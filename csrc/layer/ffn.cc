@@ -1,11 +1,11 @@
-#pragma once
-
-#include "../kernel/addbias.h"
-#include "../kernel/activations.cuh"
-#include "../util/nccl_utils.h"
+#include "ffn.h"
 namespace layer{
-    template<typename T>
-    void ffn{
+    /*
+    ffn:matrix multiple.Feed forward network with tensor parallelism
+     
+    */
+   template<typename T>
+   void ffn{
     T* output,
 	T* input,
 
@@ -21,5 +21,7 @@ namespace layer{
 	ActivationType activation_type,
 
 	T* inter_buf,
-    };
+    }{
+        
+    }
 }
