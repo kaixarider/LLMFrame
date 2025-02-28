@@ -1,4 +1,4 @@
-//TODO:把embedding搞明白
+
 #include "embedding.h"
 namespace kernel{
     template<typename T, bool IS_NEOX>

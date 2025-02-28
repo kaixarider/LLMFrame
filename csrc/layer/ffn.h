@@ -21,5 +21,7 @@ namespace layer{
 	ActivationType activation_type,
 
 	T* inter_buf,
+	util::CublasWrapper cublas_wrapper,
+	util::NcclComm nccl_comm
     };
 }
