@@ -1,7 +1,11 @@
 from typing import List,Optional
 from MixFrame.request.sampling_parameter import SamplingParemeters
 import logging
+from enum import Enum
 logger = logging.getLogger(__name__)
+class ScheduleType(Enum):
+    CB=1 #continuous batching
+    PD=2 #prefill and decode disaggregation
 class Request:
     """A request contains the user's prompt, generated tokens and related information.
     Args:
@@ -29,6 +33,7 @@ class Request:
         self.sampling_parameters=sampling_parameters
         self.priority=priority
         
+        self.scheduled_time=None
         #generation
         self.generated_tokens=[]
         self.generated_token_ids=[]
@@ -36,13 +41,17 @@ class Request:
         self.finish_prefill_time=None
         self.is_finish=False
         self.is_running=False
-    
+
     def get_priority(self)->int:
         return self.priority
     
-    def set_priority(self)->int:
-        return self.priority
-    
+    def set_priority(self,priority:int)->None:
+        self.priority=priority
+        
+    def set_scheduled_time(self,time:float)->None:
+        self.scheduled_time=time
+    def set_finish_prefill_time(self,time:float)->None:
+        self.finish_prefill_time=time
     def get_output_len(self)->int:
         assert(len(self.generated_token_ids==len(self.generated_tokens)))
         return len(self.generated_token_ids)
@@ -82,16 +91,34 @@ class Request:
             return [self.generated_token_ids[-1]] #decode utilizes only one 
     
 
-class BatchedRequest:
+class BatchedRequests:
     def __init__(self,
-                 requests:Optional[List[Request]]=None):
+                 requests:Optional[List[Request]]=None,
+                 schedule_type:Optional[ScheduleType]=None):
         if requests==None:
             self.requests=[]
         else:
             self.requests=requests
+        if schedule_type==None:
+            self._judge_scheduled_type()
+        else:
+            self.scheduled_type=schedule_type   
+    def _judge_scheduled_type(self)->None:
+        return
+    
     def add_request(self,request:Request):
         self.requests.append(request)
+        return
     
+    def pop_finished_request(self)->List[Request]:
+        finish_requests,unfinished_requests=[],[]
+        for request in self.requests:
+            if request._check_stop_condition():
+                finish_requests.append(request)
+            else:
+                unfinished_requests.append(request)
+        self.requests=finish_requests
+        return finish_requests
         
 class MigrateRequests:
     '''Need to be fulfilled'''

@@ -1,8 +1,12 @@
 from abc import ABC,abstractmethod
+from enum import Enum
 
-class Scheduler_Config(ABC):
+
+from MixFrame.request.request import BatchedRequests,Request
+from MixFrame.config.parallel_config import ParallelConfig
+class SchedulerConfig(ABC):
     @abstractmethod
-    def add_request(self,request)->None:
+    def add_request(self,request:Request)->None:
         raise NotImplementedError() #add_request to the waiting queue
     
     @abstractmethod
@@ -30,3 +34,23 @@ class Scheduler_Config(ABC):
         Print the status of the scheduler.
         """
         raise NotImplementedError()
+
+class PrefillScheduleConfig(SchedulerConfig):
+    '''It performs prefill stage of requests.Then it performs '''
+    def __init__(self,
+                 parallel_config:ParallelConfig):
+        self.tp_size=parallel_config.tp_size
+        self.dp_size=parallel_config.dp_size
+        self.waiting_queue=[]
+        
+    def add_request(self, request:Request)->None:
+        self.waiting_queue.append(request)
+        
+    def abort_request(self, request_id:int):
+        for (i,request) in enumerate(self.waiting_queue):
+            if request.request_id==request_id:
+                del self.waiting_queue[i]
+                return
+    
+    def get_next_batch_and_pop(self):
+        '''condition judge and add request'''
