@@ -119,7 +119,10 @@ class BatchedRequests:
                 unfinished_requests.append(request)
         self.requests=finish_requests
         return finish_requests
-        
+    
+    def schedule_type(self)->ScheduleType:
+        return self.scheduled_type
+
 class MigrateRequests:
     '''Need to be fulfilled'''
     
