@@ -37,8 +37,7 @@ class DecodeSchedulerConfig(SchedulerConfig):
                  max_batch_size, 
                  max_token_num_each_req):
         self.parallel_config=parallel_config
-        assert policy in ['fcfs'],"prefill scheduler \
-        only supports fcfs policy"
+        assert policy in ['fcfs'],f"Error!Scheduler doesn't support {policy} "
         self.policy=policy
         self.max_batch_size=max_batch_size
         self.max_token_num_each_req=max_token_num_each_req

@@ -1,12 +1,44 @@
 '''the basic type of engine.Engine is based on scheduler and schedule requests according to
 schedule policy'''
 from abc import ABC,abstractmethod
-
-from MixFrame.config.parallel_config import ParallelConfig
-from MixFrame.config.scheduler_config import DecodeScheduleConfig,PrefillScheduleConfig
-from MixFrame.request.request import Request
+from typing import Tuple,List
+import asyncio
+from MixFrame.config.parallel_config import ParallelConfig,DisParallelConfig
+from MixFrame.config.scheduler_config import DecodeSchedulerConfig,PrefillSchedulerConfig,SchedulerConfig
+from MixFrame.scheduler.decode_stage_scheduler import DecodeStageScheduler,FCFS_DecodeStageScheduler
+from MixFrame.scheduler.prefill_stage_scheduler import PrefillStageScheduler, FCFS_PrefillStageScheduler
+from MixFrame.request.request import Request,MigrateRequests
+from MixFrame.worker.worker import Worker
+from MixFrame.util.tokenizer import get_tokenizer
 
 class SingleStepEngine(ABC):
     @abstractmethod
-    def add_reqeust(req:Request):
-        NotImplementedError
+    def getscheduler(self,sche_config:SchedulerConfig)->(DecodeStageScheduler|PrefillStageScheduler):
+        raise NotImplementedError
+    @abstractmethod
+    def __init__(self,sche_config:SchedulerConfig,para_config:DisParallelConfig)->None:
+        raise NotImplementedError
+    
+
+    
+    
+class PrefillEngine(SingleStepEngine):
+    def __init__(self,prefill_sche_config:PrefillSchedulerConfig,para_config:DisParallelConfig,model_config)->None:
+        self.sche_config=prefill_sche_config
+        self.para_config=para_config
+        self.prefill_scheduler=self.getscheduler(prefill_sche_config)
+    
+    def add_request(self,request:Request):
+        self.prefill_scheduler.add_request(request)
+
+    
+class DecodeEngine(SingleStepEngine):
+    def __init__(self,decode_sche_config:DecodeSchedulerConfig,para_config:DisParallelConfig,model_config)->None:
+        self.sche_config=decode_sche_config
+        self.para_config=para_config
+        self.decode_scheduler=self.getscheduler(decode_sche_config)
+        
+    def add_request(self,Mig_request:MigrateRequests):
+        self.decode_scheduler.add_request(Mig_request)
+            
+        
