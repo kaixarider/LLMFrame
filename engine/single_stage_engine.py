@@ -3,8 +3,8 @@ schedule policy'''
 from abc import ABC,abstractmethod
 from typing import Tuple,List
 import asyncio
-from MixFrame.config.parallel_config import ParallelConfig,DisParallelConfig
-from MixFrame.config.scheduler_config import DecodeSchedulerConfig,PrefillSchedulerConfig,SchedulerConfig
+from MixFrame.config import ParallelConfig,DisParallelConfig
+from MixFrame.config import DecodeSchedulerConfig,PrefillSchedulerConfig,SchedulerConfig
 from MixFrame.scheduler.decode_stage_scheduler import DecodeStageScheduler,FCFS_DecodeStageScheduler
 from MixFrame.scheduler.prefill_stage_scheduler import PrefillStageScheduler, FCFS_PrefillStageScheduler
 from MixFrame.request.request import Request,MigrateRequests

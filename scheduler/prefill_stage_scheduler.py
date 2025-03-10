@@ -1,6 +1,6 @@
 from abc import ABC,abstractmethod
 from MixFrame.request.request import Request,BatchedRequests,ScheduleType
-from MixFrame.config.scheduler_config import PrefillSchedulerConfig,ParallelConfig
+from MixFrame.config import PrefillSchedulerConfig,ParallelConfig
 class PrefillStageScheduler(ABC):
     '''Prefill stage scheduelr schedules requests to prefill,
     then it determines to decode locally,or migrate'''
