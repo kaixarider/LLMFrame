@@ -1,5 +1,6 @@
 from typing import List,Optional
 from MixFrame.request.sampling_parameter import SamplingParemeters
+from MixFrame.config import ParallelConfig
 import logging
 from enum import Enum
 logger = logging.getLogger(__name__)
@@ -124,7 +125,13 @@ class BatchedRequests:
         return self.scheduled_type
 
 class MigrateRequests:
-    '''Need to be fulfilled'''
+    def __init__(self,req:Request,
+                 block_idx:List[int],
+                 target:int,
+                 para_config:ParallelConfig):
+        self.block_idx=block_idx
+        self.req=req
+        self.para_config=para_config
     
     
         
