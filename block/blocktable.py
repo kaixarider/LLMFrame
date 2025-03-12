@@ -1,4 +1,4 @@
-from typing import Deque,List,Optional,Callable,Iterable
+from typing import Deque,List,Optional,Callable,Iterable,Union
 from abc import ABC,abstractmethod
 from enum import Enum
 from collections import deque
@@ -220,6 +220,23 @@ class BlockAllocator:
             blocks.append(prev_block)
         return blocks
     
+    def free(self, block: Block, keep_block_object: bool = False) -> None:
+        # Release the physical block id
+        self._free_block_id(block)
+
+        # Release the block object
+        if not keep_block_object:
+            self._block_pool.free_block(block)
+        
+    def _free_block_id(self, block: Union[Block, BlockId]) -> None:
+        if isinstance(block, Block):
+            block_id = block.block_id
+            block.block_id = None
+        else:
+            block_id = block
+        assert block_id is not None
+        self._free_block_indices.appendleft(block_id)
+        
 class BlockTable:
     def __init__(
         self,
@@ -241,7 +258,7 @@ class BlockTable:
                                 ahead_slots:int=0):
         return cdiv (len(token_ids) + ahead_slots, block_size)
     
-    def allocate_blocks_for_token_ids(
+    def _allocate_blocks_for_token_ids(
         self,
         token_ids:List[int],
         block_size:int,
@@ -275,7 +292,7 @@ class BlockTable:
     def allocate(self,
                  token_ids:List[int],
                  location:BlockLocation=BlockLocation.GPU)->None:
-        blocks = self.allocate_blocks_for_token_ids(prev_block=None,
+        blocks = self._allocate_blocks_for_token_ids(prev_block=None,
                                                      token_ids=token_ids,block_size=self._block_size
                                                 )
         self.update(blocks)
@@ -286,6 +303,30 @@ class BlockTable:
         (with their corresponding block ids)
         """
         self._blocks.update(blocks)
+        
+    def free(self)->None:
+        for block in self.blocks:
+            self._allocator.free(block)
+        self._blocks.reset()
+
+    @property
+    def blocks(self)->List[Block]:
+        return self._blocks.list()
+    @property
+    def physical_block_ids(self) -> List[int]:
+        """Returns a list of physical block indices for the blocks in the
+        BlockTable.
+
+        This property returns a list of integers, where each integer represents
+        the physical block index of a corresponding block in the `_blocks` list.
+        The physical block index is a unique identifier for the memory location
+        occupied by the block.
+
+        Returns:
+            List[int]: A list of physical block indices for the blocks in the
+                BlockTable.
+        """
+        return self._blocks.ids()
     
     
            
