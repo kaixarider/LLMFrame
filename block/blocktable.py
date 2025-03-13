@@ -17,8 +17,9 @@ class Block:
         prev_block:Optional['Block'],
         block_size:int,
         block_id:BlockId,
+        block_location:BlockLocation,
         token_ids:Optional[List[int]]=None,
-        block_location:BlockLocation=BlockLocation.GPU
+        
     )->None:
         self._token_ids=[]
         self._token_ids.extend(token_ids)
@@ -73,7 +74,7 @@ class BlockPool:
         self._pool_size=cur_bool_size*2
         self._free_id.extend(range(cur_bool_size,self._pool_size))
         for id in range(cur_bool_size,self._pool_size):
-            self._pool.append(Block(self._block_size,id))
+            self._pool.append(Block(self._block_size,id,self.pool_location,None))
     
     def free_block(self,block:Block)->None:
         self._free_id.appendleft(block.block_id)
@@ -150,8 +151,10 @@ class BlockAllocator:
         self,
         num_blocks:int,
         block_size:int,
+        location:BlockLocation,
         block_ids: Optional[Iterable[int]] = None,
         block_pool: Optional[BlockPool] = None,
+        
     )->None:
         if block_ids is None:
             block_ids = range(num_blocks)
@@ -165,7 +168,7 @@ class BlockAllocator:
             # than physical blocks
             extra_factor=4
             self._block_pool = BlockPool(self._block_size, 
-                                         num_blocks * extra_factor)
+                                         num_blocks * extra_factor,location)
         else:
             # In this case, the block pool is provided by the caller,
             # which means that there is most likely a need to share
@@ -238,6 +241,7 @@ class BlockAllocator:
         self._free_block_indices.appendleft(block_id)
         
 class BlockTable:
+    '''record blocks a req use'''
     def __init__(
         self,
         block_size:int,
