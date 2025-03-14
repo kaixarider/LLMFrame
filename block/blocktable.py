@@ -318,7 +318,8 @@ class BlockTable:
         (with their corresponding block ids)
         """
         self._blocks.update(blocks)
-        
+    def used_blocks(self)->List[Block]:
+        return self._blocks._blocks
     def free(self)->None:
         for block in self.blocks:
             self._allocator.free(block)

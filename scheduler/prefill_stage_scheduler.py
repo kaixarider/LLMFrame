@@ -1,7 +1,7 @@
 from abc import ABC,abstractmethod
 from typing import List
 from enum import Enum,auto
-from MixFrame.request.request import Request,BatchedRequests,ScheduleType
+from MixFrame.request.request import Request,BatchedRequests,ScheduleType,MigrateRequests
 from MixFrame.config import PrefillSchedulerConfig,ParallelConfig,CacheConfig
 from MixFrame.block.blockmanager import BlockManager
 class BatchingMethod:
@@ -76,7 +76,7 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
         batch=BatchedRequests()
         if batching_method==BatchingMethod.CB:
             for request in self.running_queue:
-                
+                ##缺少continous batching的部分
             return batch
         elif batching_method==BatchingMethod.PD:
             for request in self.waiting_queue:
@@ -87,9 +87,11 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
         else:
             raise ValueError(f"Error!There is no {batching_method} batching method")
     
-    def migrate_requests(self,batch:BatchedRequests)->None:
+    def migrate_requests(self,batch:BatchedRequests,target:int)->None:
         assert batch.schedule_type()==ScheduleType.PD,"continuous batching doesn't need to migrate!"
         for req in batch.requests:
             block_table=self.block_manager.req_table[req.request_id]
             ##缺少block_table中读取block的函数，用于迁移
-        
+            miragate_request=MigrateRequests(req=req,para_config=self.parallel_config)
+            blocks=block_table.used_blocks()
+            miragate_request.add_blocks(blocks)

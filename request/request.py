@@ -1,6 +1,7 @@
 from typing import List,Optional
 from MixFrame.request.sampling_parameter import SamplingParemeters
 from MixFrame.config import ParallelConfig
+from MixFrame.block.blocktable import Block
 import logging
 from enum import Enum
 import enum
@@ -139,12 +140,13 @@ class BatchedRequests:
 
 class MigrateRequests:
     def __init__(self,req:Request,
-                 block_idx:List[int],
-                 target:int,
-                 para_config:ParallelConfig):
-        self.block_idx=block_idx
+                 para_config:ParallelConfig)->None:
+        
         self.req=req
         self.para_config=para_config
-    
-    
+        self.blocks=[]
+
+    def add_blocks(self,blocks:List[Block])->None:
+        self.blocks.extend(blocks)
+        return 
         
