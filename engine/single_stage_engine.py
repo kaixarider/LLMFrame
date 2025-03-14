@@ -9,7 +9,7 @@ from MixFrame.scheduler.decode_stage_scheduler import DecodeStageScheduler,FCFS_
 from MixFrame.scheduler.prefill_stage_scheduler import PrefillStageScheduler, FCFS_PrefillStageScheduler
 from MixFrame.request.request import Request,MigrateRequests
 from MixFrame.worker.worker import Worker
-from MixFrame.util.tokenizer import get_tokenizer
+from MixFrame.tokenizer.tokenizer import get_tokenizer
 
 class SingleStepEngine(ABC):
     @abstractmethod

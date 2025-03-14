@@ -1,6 +1,13 @@
 from abc import ABC,abstractmethod
+from typing import List
+from enum import Enum,auto
 from MixFrame.request.request import Request,BatchedRequests,ScheduleType
-from MixFrame.config import PrefillSchedulerConfig,ParallelConfig
+from MixFrame.config import PrefillSchedulerConfig,ParallelConfig,CacheConfig
+from MixFrame.block.blockmanager import BlockManager
+class BatchingMethod:
+    CB=auto()#continuous batching
+    PD=auto()#pd disaggregation
+    
 class PrefillStageScheduler(ABC):
     '''Prefill stage scheduelr schedules requests to prefill,
     then it determines to decode locally,or migrate'''
@@ -16,7 +23,7 @@ class PrefillStageScheduler(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def abort_request(self,request:Request)->None:
+    def abort_request(self,request_id:int)->None:
         '''abort request that can't be executed'''
         raise NotImplementedError
     
@@ -39,21 +46,50 @@ class PrefillStageScheduler(ABC):
 class FCFS_PrefillStageScheduler(PrefillStageScheduler):
     def __init__(self,
                  parallel_config:ParallelConfig,
-                 prefill_scheduler_config:PrefillSchedulerConfig):
+                 prefill_scheduler_config:PrefillSchedulerConfig,
+                 cache_config:CacheConfig)->None:
         assert prefill_scheduler_config.policy=='fcfs',"FCFS scheduler should be served for \
             fcfs policy!"
         self.parallel_config=parallel_config
         self.prefill_scheduler_config=prefill_scheduler_config
-        
+        self.block_manager=BlockManager(block_size=cache_config.block_size,num_gpu_blocks=cache_config.num_gpu_blocks,
+                                        num_cpu_blocks=cache_config.num_cpu_blocks)# to be finished
         '''
         four queues.
         -waiting queue:requests'''
-        self.waiting_queue=[]
+        self.waiting_queue:List[Request]=[]
         self.running_queue=[]
         self.migrate_queue=[]
         self.swap_queue=[]
     
-    def add_request(self, request:Request):
+    def add_request(self, request:Request)->None:
         self.waiting_queue.append(request)
+        self.block_manager.allocate(request)
+        
+    def abort_request(self, request_id:int)->None:
+        for (i,request) in enumerate(self.waiting_queue):
+            if request_id==request.request_id:
+                del self.waiting_queue[i]
+                return
+
+    def select_requests(self,batching_method:BatchingMethod)->BatchedRequests:
+        batch=BatchedRequests()
+        if batching_method==BatchingMethod.CB:
+            for request in self.running_queue:
+                
+            return batch
+        elif batching_method==BatchingMethod.PD:
+            for request in self.waiting_queue:
+                '''There are several limitations '''
+                if len(batch.requests)<self.prefill_scheduler_config.max_batch_size and self.block_manager.can_allocate(request):
+                    batch.add_request(request)
+            return batch
+        else:
+            raise ValueError(f"Error!There is no {batching_method} batching method")
     
-    
+    def migrate_requests(self,batch:BatchedRequests)->None:
+        assert batch.schedule_type()==ScheduleType.PD,"continuous batching doesn't need to migrate!"
+        for req in batch.requests:
+            block_table=self.block_manager.req_table[req.request_id]
+            ##缺少block_table中读取block的函数，用于迁移
+        

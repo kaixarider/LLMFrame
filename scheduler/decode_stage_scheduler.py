@@ -1,6 +1,7 @@
 from abc import ABC,abstractmethod
 from MixFrame.request.request import Request,BatchedRequests,ScheduleType,MigrateRequests
 from MixFrame.config import DecodeSchedulerConfig,ParallelConfig
+from MixFrame.block.blockmanager import BlockManager
 class DecodeStageScheduler(ABC):
     '''Prefill stage scheduelr schedules requests to prefill,
     then it determines to decode locally,or migrate'''

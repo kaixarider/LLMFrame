@@ -33,7 +33,10 @@ class CacheConfig:
         self.max_num_blocks_per_req=max_num_blocks_per_req
         self.gpu_memory_utilization=gpu_memory_utilization
         self.cpu_swap_space=cpu_swap_space
-        
+    
+    def get_num_blocks(self):
+        self.num_gpu_blocks=
+        self.num_cpu_blocks=
 class ParallelConfig:
     '''config numbers of parallel nodes'''
     def __init__(
@@ -317,5 +320,4 @@ class DecodeSchedulerConfig(SchedulerConfig):
         self.prefill_IDF=None #supposed to be a json to predict prefill duration
     def set_IDF(self,IDF):
         self.IDF=IDF
-    
     
