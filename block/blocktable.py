@@ -2,6 +2,7 @@ from typing import Deque,List,Optional,Callable,Iterable,Union
 from abc import ABC,abstractmethod
 from enum import Enum
 from collections import deque
+import math
 
 from MixFrame.util import chunk_list
 BlockId=int
@@ -99,7 +100,7 @@ class BlockPool:
             block_location=self.pool_location
         )
         block.pool_id=pool_id
-
+        return block
 class BlockList:
     def __init__(
         self,
@@ -239,7 +240,11 @@ class BlockAllocator:
             block_id = block
         assert block_id is not None
         self._free_block_indices.appendleft(block_id)
-        
+    
+    def get_num_free_block(self):
+        return len(self._free_block_indices)
+    
+
 class BlockTable:
     '''record blocks a req use'''
     def __init__(
@@ -256,12 +261,18 @@ class BlockTable:
         self._blocks: BlockList = BlockList(blocks)
         self._max_block_sliding_window = max_block_sliding_window
         
+        self._num_full_slots=self._get_num_token_ids()
     @staticmethod
     def get_num_required_blocks(token_ids:List[int],
                                 block_size:int,
                                 ahead_slots:int=0):
         return cdiv (len(token_ids) + ahead_slots, block_size)
-    
+    def _get_num_token_ids(self) -> int:
+        res = 0
+        for block in self.blocks:
+            res += len(block._token_ids)
+        return res
+
     def _allocate_blocks_for_token_ids(
         self,
         token_ids:List[int],
@@ -331,7 +342,134 @@ class BlockTable:
                 BlockTable.
         """
         return self._blocks.ids()
+    @property
+    def _num_empty_slots(self) -> int:
+        return len(self._blocks) * self._block_size - self._num_full_slots
     
+    def get_num_blocks_touched_by_append_slots(
+            self, token_ids: List[int], num_lookahead_slots: int) -> int:
+        """Determine how many blocks will be "touched" by appending the token
+        ids.
+
+        This is required for the scheduler to determine whether a sequence can
+        continue generation, or if it must be preempted.
+        """
+        # Math below is equivalent to:
+        # all_token_ids = token_ids + [-1] * num_lookahead_slots
+        # token_blocks = self._chunk_token_blocks_for_append(all_token_ids)
+        # return len(token_blocks)
+
+        num_token_ids = len(token_ids) + num_lookahead_slots
+        first_chunk_size = self._block_size - (self._num_full_slots %
+                                               self._block_size)
+        num_token_blocks = (1 + math.ceil(
+            (num_token_ids - first_chunk_size) / self._block_size))
+        return num_token_blocks
     
+    def get_unseen_token_ids(self, req_token_ids: List[int]) -> List[int]:
+        """Get the number of "unseen" tokens in the sequence.
+
+        Unseen tokens are tokens in the sequence corresponding to this block
+        table, but are not yet appended to this block table.
+
+        Args:
+            sequence_token_ids (List[int]): The list of token ids in the
+                sequence.
+
+        Returns:
+            List[int]: The postfix of sequence_token_ids that has not yet been
+                appended to the block table.
+        """
+
+        # Since the block table is append-only, the unseen token ids are the
+        # ones after the appended ones.
+        return req_token_ids[self._num_full_slots:]
            
-        
+    def append_token_ids(self,
+                         token_ids: List[int],
+                         ahead_slots: int = 0,
+                         num_computed_slots: Optional[int] = None) -> None:
+        """Appends a sequence of token IDs to the existing blocks in the
+        BlockTable.
+
+        This method appends the given sequence of token IDs to the existing
+        blocks in the BlockTable. If there is not enough space in the existing
+        blocks, new blocks are allocated using the `ensure_num_empty_slots`
+        method to accommodate the additional tokens.
+
+        The token IDs are divided into chunks of size `block_size` (except for
+        the first chunk, which may be smaller), and each chunk is appended to a
+        separate block.
+
+        Args:
+            token_ids (List[int]): The sequence of token IDs to be appended.
+            num_computed_slots (Optional[int]): The number of KV cache slots
+                that are already filled (computed).
+                When sliding window is enabled, this is used to compute how many
+                blocks to drop at the front of the sequence.
+                Without sliding window, None can be passed.
+                Without chunked prefill, it should be the same as
+                _num_full_slots.
+            extra_hash (Optional[int]): The hash value of additional
+                factors such as adapters that influence the block, apart
+                from the token_ids.
+        """
+        assert len(self._blocks) > 0
+
+        # Drop blocks that are no longer needed due to sliding window
+        if self._max_block_sliding_window is not None:
+            null_block = self._allocator.allocate_or_get_null_block()
+            assert num_computed_slots is not None
+            end_block_idx = (num_computed_slots //
+                             self._block_size) - self._max_block_sliding_window
+            for idx in range(0, end_block_idx):
+                b = self._blocks[idx]
+                if b is not null_block:
+                    self._allocator.free(b)
+                    self._blocks[idx] = null_block
+
+        # Ensure there are enough empty slots for the new tokens plus
+        # lookahead slots
+        self.ensure_num_empty_slots(num_empty_slots=len(token_ids) +
+                                    ahead_slots)
+
+        # Update the blocks with the new tokens
+        first_block_idx = self._num_full_slots // self._block_size
+        token_blocks = self._chunk_token_blocks_for_append(token_ids)
+
+        for i, token_block in enumerate(token_blocks):
+            self._blocks.append_token_ids(first_block_idx + i, token_block)
+
+        self._num_full_slots += len(token_ids)
+    
+    def ensure_num_empty_slots(self,
+                               num_empty_slots: int) -> None:
+        """Ensures that the BlockTable has at least the specified number of
+        empty slots available.
+
+        This method checks if the BlockTable has enough empty slots (i.e.,
+        available space) to accommodate the requested number of tokens. If not,
+        it allocates additional blocks on the GPU to ensure that the required
+        number of empty slots is available.
+
+        Args:
+            num_empty_slots (int): The minimum number of empty slots required.
+            extra_hash (Optional[int]): The hash value of additional
+                factors such as adapters that influence the block, apart
+                from the token_ids.
+        """
+        # Currently the block table only supports
+        # appending tokens to GPU blocks.
+
+        if self._num_empty_slots >= num_empty_slots:
+            return
+
+        slots_to_allocate = num_empty_slots - self._num_empty_slots
+        blocks_to_allocate = cdiv(slots_to_allocate, self._block_size)
+
+        for _ in range(blocks_to_allocate):
+            assert len(self._blocks) > 0
+            self._blocks.append(
+                self._allocator.allocate_mutable_block(
+                    prev_block=self._blocks[-1],
+                    location=BlockLocation.GPU))

@@ -3,10 +3,16 @@ from MixFrame.request.sampling_parameter import SamplingParemeters
 from MixFrame.config import ParallelConfig
 import logging
 from enum import Enum
+import enum
 logger = logging.getLogger(__name__)
 class ScheduleType(Enum):
     CB=1 #continuous batching
     PD=2 #prefill and decode disaggregation
+class RequestStatus(Enum):
+    WAITING=enum.auto() #requests to be prefilled
+    RUNNING=enum.auto() #requests finished prefilling,decoding
+    SWAPPED=enum.auto() #requests swapped in cpu
+    
 class Request:
     """A request contains the user's prompt, generated tokens and related information.
     Args:
@@ -42,7 +48,11 @@ class Request:
         self.finish_prefill_time=None
         self.is_finish=False
         self.is_running=False
-
+        #status
+        self.status:RequestStatus=RequestStatus.WAITING
+        self._num_computed_tokens=0 ##prefilled tokens
+        self._update_cached_all_tokens()
+        
     def get_priority(self)->int:
         return self.priority
     
@@ -54,7 +64,6 @@ class Request:
     def set_finish_prefill_time(self,time:float)->None:
         self.finish_prefill_time=time
     def get_output_len(self)->int:
-        assert(len(self.generated_token_ids==len(self.generated_tokens)))
         return len(self.generated_token_ids)
     
     def _check_stop_condition(self)->bool:
@@ -90,8 +99,12 @@ class Request:
             return self.prompt_token_ids #prefill utilizes all tokens in prompt
         else:
             return [self.generated_token_ids[-1]] #decode utilizes only one 
-    
+    def get_len(self):
+        return len(self.prompt_token_ids)+self.get_output_len() #output+input
 
+    def _update_cached_all_tokens(self):
+        self._cached_all_token_ids: List[int] = list(self.prompt_token_ids +
+                                                     self.generated_token_ids)
 class BatchedRequests:
     def __init__(self,
                  requests:Optional[List[Request]]=None,
