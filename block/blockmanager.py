@@ -2,7 +2,7 @@
 from typing import Optional,Tuple,Dict,List
 import enum
 from MixFrame.block.blocktable import BlockTable,BlockAllocator,BlockLocation
-from MixFrame.request.request import Request,BatchedRequests
+from MixFrame.request.request import Request,BatchedRequests,MigrateRequests
 ReqId=int
 BlockId=int
 class AllocStatus(enum.Enum):
@@ -51,18 +51,28 @@ class BlockManager:
         else:
             return AllocStatus.LATER
         
-    def _get_req_blocktable(self,req:Request)->BlockAllocator:
+    def _get_req_blocktable(self,req:Request)->BlockTable:
         block_table = BlockTable(
             block_size=self.block_size,block_allocator=self.allocator,max_block_sliding_window=self.sliding_window
         )
         if req.get_input_token_ids():
             block_table.allocate(req.get_input_token_ids)
         return block_table
+    def _get_Migreq_blocktable(self,req:MigrateRequests)->BlockAllocator:
+        block_table = BlockTable(
+            block_size=self.block_size,block_allocator=self.allocator,max_block_sliding_window=self.sliding_window
+        )
+        block_table._copy_blocks(req.blocks)
+        return block_table
     
     def allocate(self,req:Request)->None:
         assert not req.request_id in self.req_table.keys(),f"block table of {req.request_id} exists"
         block_table=self._get_req_blocktable(req)
         self.req_table[req.request_id]=block_table
+    def allocate_prefilled_req(self,req:MigrateRequests):
+        assert not req.req.request_id in self.req_table.keys(),f"block table of {req.req.request_id} exists"
+        block_table=self._get_Migreq_blocktable(req)
+        self.req_table[req.req.request_id]=block_table
         
     def can_append_slots(self,req:Request,ahead_slots)->bool:
         num_touched_blocks=0
