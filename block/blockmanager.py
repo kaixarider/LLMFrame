@@ -63,7 +63,7 @@ class BlockManager:
         assert not req.request_id in self.req_table.keys(),f"block table of {req.request_id} exists"
         block_table=self._get_req_blocktable(req)
         self.req_table[req.request_id]=block_table
-    
+        
     def can_append_slots(self,req:Request,ahead_slots)->bool:
         num_touched_blocks=0
         block_table=self.req_table[req.request_id]

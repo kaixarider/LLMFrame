@@ -92,6 +92,8 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
         for req in batch.requests:
             block_table=self.block_manager.req_table[req.request_id]
             ##缺少block_table中读取block的函数，用于迁移
-            miragate_request=MigrateRequests(req=req,para_config=self.parallel_config)
+            migrate_request=MigrateRequests(req=req,para_config=self.parallel_config)
             blocks=block_table.used_blocks()
-            miragate_request.add_blocks(blocks)
+            for block in blocks:
+                token_ids=block._token_ids
+                migrate_request.add_block_token_ids(token_ids)

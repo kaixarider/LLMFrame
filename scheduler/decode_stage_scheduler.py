@@ -1,6 +1,6 @@
 from abc import ABC,abstractmethod
 from MixFrame.request.request import Request,BatchedRequests,ScheduleType,MigrateRequests
-from MixFrame.config import DecodeSchedulerConfig,ParallelConfig
+from MixFrame.config import DecodeSchedulerConfig,ParallelConfig,CacheConfig
 from MixFrame.block.blockmanager import BlockManager
 class DecodeStageScheduler(ABC):
     '''Prefill stage scheduelr schedules requests to prefill,
@@ -39,10 +39,11 @@ class DecodeStageScheduler(ABC):
         raise NotImplementedError
 class FCFS_DecodeStageScheduler(DecodeStageScheduler):
     def __init__(self,parallel_config:ParallelConfig,
-                 decode_scheduler_config:DecodeSchedulerConfig):
+                 decode_scheduler_config:DecodeSchedulerConfig,
+                 cache_config:CacheConfig):
         self.parallel_config=parallel_config
         self.decode_scheduler_config=decode_scheduler_config 
-        
+        self.block_manager=BlockManager(block_size=cache_config.block_size,num_gpu_blocks=,num_cpu_blocks=)
         #queues
         self.waiting_queue=[]
         self.running_queue=[]
@@ -53,4 +54,6 @@ class FCFS_DecodeStageScheduler(DecodeStageScheduler):
         self.running_queue.append(request)
     
     def _convert_migrate_requests(self, Mig_request:MigrateRequests)->Request:
-        '''not fulfilled yet'''
+        req=Mig_request.req
+        self.block_manager.allocate(req)
+        self.block_manager.req_table[req.request_id]

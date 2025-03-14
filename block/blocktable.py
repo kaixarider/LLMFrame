@@ -247,6 +247,7 @@ class BlockAllocator:
 
 class BlockTable:
     '''record blocks a req use'''
+    '''缺少migrate后取出blocks的函数'''
     def __init__(
         self,
         block_size:int,
@@ -272,7 +273,33 @@ class BlockTable:
         for block in self.blocks:
             res += len(block._token_ids)
         return res
+    def _copy_blocks(
+        self,
+        other_token_blocks:List[List[int]]
+    )->List[Block]:
+        blocks:List[Block]=[]
+        block_token_ids:List[int] = []
+        tail_token_ids:List[int] = []
+        for tokens in other_token_blocks:
+            if len(tokens)==self._block_size:
+                block_token_ids.append(tokens)
+            else:
+                tail_token_ids.append(tokens)
+        if block_token_ids:
+            blocks.extend(
+                self._allocator.allocate_immutable_blocks(prev_block,BlockLocation.GPU))
+            prev_block = blocks[-1]
+        if tail_token_ids:
+            assert len(tail_token_ids) == 1
+            cur_token_ids = tail_token_ids[0]
 
+            block = self._allocator.allocate_mutable_block(
+                prev_block=prev_block,)
+            block.append_token_ids(cur_token_ids)
+
+            blocks.append(block)
+
+        return blocks
     def _allocate_blocks_for_token_ids(
         self,
         token_ids:List[int],

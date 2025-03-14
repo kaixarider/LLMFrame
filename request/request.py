@@ -144,9 +144,9 @@ class MigrateRequests:
         
         self.req=req
         self.para_config=para_config
-        self.blocks=[]
+        self.blocks:List[List[int]]=[]
 
-    def add_blocks(self,blocks:List[Block])->None:
-        self.blocks.extend(blocks)
+    def add_block_token_ids(self,block_token_ids:List[int])->None:
+        self.blocks.extend(block_token_ids)
         return 
         
