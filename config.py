@@ -281,6 +281,13 @@ Args:
                     return False
 
         return True
+    def get_dtype_size(self) -> int:
+        if self.dtype == "fp16":
+            return 2
+        elif self.dtype == "fp32":
+            return 4
+        else:
+            raise NotImplementedError(f"dtype {self.dtype} not supported")
 
 
     

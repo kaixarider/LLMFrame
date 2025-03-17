@@ -2,6 +2,11 @@ from typing import List
 import torch
 import psutil
 import subprocess as sp
+import enum
+import random
+import numpy as np
+GB=2**30
+MB=2**20
 def chunk_list(lst:List,size:int):
     for i in range(0,len(lst),size):
         yield lst[i:i+size]
@@ -38,3 +43,16 @@ def get_gpu_memory_usage(gpu: int = 0):
 def get_cpu_memory() -> int:
     """Returns the total CPU memory of the node in bytes."""
     return psutil.virtual_memory().total
+def set_random_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+class ScheduleType(enum.Enum):
+    PD=enum.auto()
+    CB=enum.auto()
+
+class InferenceStage(enum.Enum):
+    prefill=enum.auto()
+    decode=enum.auto()

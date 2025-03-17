@@ -1,7 +1,7 @@
 from abc import ABC,abstractmethod
 from typing import List
 import torch
-from MixFrame.request.request import Request,BatchedRequests,ScheduleType,MigrateRequests,RequestStatus
+from MixFrame.request.request import Request,BatchedRequests,ScheduleType,MigrateRequest,RequestStatus
 from MixFrame.config import DecodeSchedulerConfig,ParallelConfig,CacheConfig
 from MixFrame.block.blockmanager import BlockManager
 class DecodeStageScheduler(ABC):
@@ -17,7 +17,7 @@ class DecodeStageScheduler(ABC):
     async def recv_mig_request(self):
         raise NotImplementedError
     @abstractmethod
-    def _add_request(self,Mig_req:MigrateRequests)->None:
+    def _add_request(self,Mig_req:MigrateRequest)->None:
         '''add_request to waiting queue'''
         raise NotImplementedError
     
@@ -40,7 +40,7 @@ class DecodeStageScheduler(ABC):
         '''determine whether this request can be scheduled'''
         raise NotImplementedError
     @abstractmethod
-    def _convert_migrate_requests(self,Mig_request:MigrateRequests)->Request:
+    def _convert_migrate_requests(self,Mig_request:MigrateRequest)->Request:
         raise NotImplementedError
     
 class FCFS_DecodeStageScheduler(DecodeStageScheduler):
@@ -52,27 +52,28 @@ class FCFS_DecodeStageScheduler(DecodeStageScheduler):
         self.block_manager=BlockManager(block_size=cache_config.block_size,num_gpu_blocks=cache_config.num_gpu_blocks,num_cpu_blocks=cache_config.num_cpu_blocks)
         #queues
         
-        self.waiting_queue:List[MigrateRequests]=[] #queues containing migrated requests that haven't been transformed to request
+        self.waiting_queue:List[MigrateRequest]=[] #queues containing migrated requests that haven't been transformed to request
         self.running_queue:List[Request]=[] #queues containing decoding requests
         self.swap_queue:List[Request]=[]
     async def recv_mig_request(self):
-        mig_req=torch.op.recv()
+        mig_req=torch.ops.recv()
         self.waiting_queue.append(mig_req)
         if self.waiting_queue:
             for req in self.waiting_queue:
                 self._add_request(req)
                 
-    def _add_request(self,Mig_request:MigrateRequests)->None:
+    def _add_request(self,Mig_request:MigrateRequest)->None:
         request=self._convert_migrate_requests(Mig_request)
         self.running_queue.append(request)
         self.block_manager.allocate_prefilled_req(Mig_request)
+        del Mig_request
         
-    def _convert_migrate_requests(self, Mig_request:MigrateRequests)->Request:
+    def _convert_migrate_requests(self, Mig_request:MigrateRequest)->Request:
         req=Mig_request.req
-        self.block_manager.allocate(req)
         self.block_manager.req_table[req.request_id]
         req.status=RequestStatus.RUNNING
         return req
+    
     def abort_request(self, request:Request)->None:
         for (i,req) in enumerate(self.waiting_queue):
             if request.request_id==req.req.request_id:
@@ -80,7 +81,6 @@ class FCFS_DecodeStageScheduler(DecodeStageScheduler):
                 return
     
     def schedule_requests(self):
-        ##decode阶段的schedule逻辑还没搞明白
         batch=BatchedRequests()
         def _can_schedule(req:Request)->bool:
             if (len(batch.requests)<self.decode_scheduler_config.max_batch_size) and \
@@ -92,6 +92,10 @@ class FCFS_DecodeStageScheduler(DecodeStageScheduler):
                 batch.add_request(req)
         return batch
             
-        
-    
+def get_FCFS_decode_scheduler(parallel_config:ParallelConfig,
+                 decode_scheduler_config:DecodeSchedulerConfig,
+                 cache_config:CacheConfig)->FCFS_DecodeStageScheduler:
+    return FCFS_DecodeStageScheduler(parallel_config=parallel_config,
+                                     decode_scheduler_config=decode_scheduler_config,
+                                     cache_config=cache_config)
     

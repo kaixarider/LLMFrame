@@ -1,15 +1,14 @@
+import logging
 from typing import List,Optional
+import enum
 from MixFrame.request.sampling_parameter import SamplingParemeters
 from MixFrame.config import ParallelConfig
 from MixFrame.block.blocktable import Block
-import logging
-from enum import Enum
-import enum
+from MixFrame.util import ScheduleType
+
 logger = logging.getLogger(__name__)
-class ScheduleType(Enum):
-    CB=1 #continuous batching
-    PD=2 #prefill and decode disaggregation
-class RequestStatus(Enum):
+
+class RequestStatus(enum.Enum):
     WAITING=enum.auto() #requests to be prefilled
     RUNNING=enum.auto() #requests finished prefilling,decoding
     SWAPPED=enum.auto() #requests swapped in cpu
@@ -53,7 +52,8 @@ class Request:
         self.status:RequestStatus=RequestStatus.WAITING
         self._num_computed_tokens=0 ##prefilled tokens
         self._update_cached_all_tokens()
-        
+        #schedule_type
+        self.schedule_type=None
     def get_priority(self)->int:
         return self.priority
     
@@ -106,22 +106,20 @@ class Request:
     def _update_cached_all_tokens(self):
         self._cached_all_token_ids: List[int] = list(self.prompt_token_ids +
                                                      self.generated_token_ids)
+        
+    def set_schedule_type(self,value:ScheduleType):
+        self.schedule_type=value
+
 class BatchedRequests:
     def __init__(self,
-                 requests:Optional[List[Request]]=None,
-                 schedule_type:Optional[ScheduleType]=None):
+                 requests:Optional[List[Request]]=None):
         if requests==None:
             self.requests=[]
         else:
             self.requests=requests
             self._all_tokens=sum(request.get_len() for request in requests)
-        if schedule_type==None:
-            self._judge_scheduled_type()
-        else:
-            self.scheduled_type=schedule_type   
-    def _judge_scheduled_type(self)->None:
-        return
-    
+
+
     def add_request(self,request:Request):
         self.requests.append(request)
         self._all_tokens+=request.get_len()
@@ -138,13 +136,10 @@ class BatchedRequests:
         self._all_tokens=sum(request.get_len() for request in unfinished_requests)
         return finish_requests
     
-    def schedule_type(self)->ScheduleType:
-        return self.scheduled_type
-
-class MigrateRequests:
+class MigrateRequest:
     def __init__(self,req:Request,
                  para_config:ParallelConfig)->None:
-        
+        assert req.schedule_type==ScheduleType.PD,"continous batching shouldn't be migrated"
         self.req=req
         self.para_config=para_config
         self.blocks:List[List[int]]=[]

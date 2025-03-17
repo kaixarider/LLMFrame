@@ -45,6 +45,9 @@ class Block:
     @property
     def empty_slots(self)->int:
         return self.block_size-len(self._token_ids)
+    @property
+    def is_full(self)->bool:
+        return self.empty_slots==0
     
     def set_blockid(self,value:int)->None:
         self.block_id=value
@@ -163,6 +166,7 @@ class BlockAllocator:
         self._all_block_indices = frozenset(block_ids)
         assert len(self._all_block_indices) == num_blocks
         self._block_size = block_size
+        self.location=location
         if block_pool is None:
             # Pre-allocate "num_blocks * extra_factor" block objects.
             # The "* extra_factor" is a buffer to allow more block objects
@@ -244,7 +248,37 @@ class BlockAllocator:
     def get_num_free_block(self):
         return len(self._free_block_indices)
     
+    def swap_out(self,blocks:List[Block])->List[int]:
+        block_ids=[]
+        for block in blocks:
+            self._free_block_id(block.block_id)
+            block_ids.append(block.block_id)
+        return 
+    def swap_in(self,blocks:List[Block])->List[int]:
+        block_ids=[]
+        for block in blocks:
+            if block.is_full:
+                tmp_block=self.allocate_immutable_block(prev_block=block.prev_block,token_ids=block._token_ids,location=self.location)
+            else:
+                tmp_block=self.allocate_mutable_block(prev_block=block.prev_block,location=self.location)
+                tmp_block.append_token_ids(block._token_ids)
+            block.block_id=tmp_block.block_id
+            tmp_block.block_id = None
+            self._block_pool.free_block(tmp_block)
+            block_ids.append(block.block_id)
+        return block_ids
+    def get_physical_block_id(self, absolute_id: int) -> int:
+        """Returns the zero-offset block id on certain block allocator
+        given the absolute block id.
 
+        Args:
+            absolute_id (int): The absolute block id for the block 
+            in whole allocator.
+
+        Returns:
+            int: The zero-offset block id on certain device.
+        """
+        return sorted(self._all_block_indices).index(absolute_id)
 class BlockTable:
     '''record blocks a req use'''
     '''缺少migrate后取出blocks的函数'''
