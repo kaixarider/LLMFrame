@@ -1,6 +1,8 @@
 from abc import ABC,abstractmethod
 from typing import List
 from enum import Enum,auto
+import torch
+
 from MixFrame.request.request import Request,BatchedRequests,ScheduleType,MigrateRequests
 from MixFrame.config import PrefillSchedulerConfig,ParallelConfig,CacheConfig
 from MixFrame.block.blockmanager import BlockManager
@@ -37,7 +39,7 @@ class PrefillStageScheduler(ABC):
         suit a batch'''
         raise NotImplementedError
     @abstractmethod
-    def _can_schedule(self,request:Request):
+    def select_requests(self,batching_method:BatchingMethod)->BatchedRequests:
         '''determine whether this request can be scheduled'''
         raise NotImplementedError
     @abstractmethod
@@ -79,15 +81,23 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
                 ##缺少continous batching的部分
             return batch
         elif batching_method==BatchingMethod.PD:
-            for request in self.waiting_queue:
-                '''There are several limitations '''
-                if len(batch.requests)<self.prefill_scheduler_config.max_batch_size and self.block_manager.can_allocate(request):
-                    batch.add_request(request)
+            def _check_add_cur_batch(req:Request)->bool:
+                return(
+                    (len(batch.requests)<self.prefill_scheduler_config.max_batch_size) #batch size is less than max limitation
+                    and
+                (req.get_len()<=self.prefill_scheduler_config.max_token_num_each_req) #prompt length is less than max limitation
+                and
+                (self.block_manager.can_allocate(req))
+                )
+            for req in self.waiting_queue:
+                if _check_add_cur_batch(req):
+                    batch.add_request(req)
+                    self.block_manager.allocate(req)
             return batch
         else:
             raise ValueError(f"Error!There is no {batching_method} batching method")
     
-    def migrate_requests(self,batch:BatchedRequests,target:int)->None:
+    async def migrate_requests(self,batch:BatchedRequests,target:int)->None:
         assert batch.schedule_type()==ScheduleType.PD,"continuous batching doesn't need to migrate!"
         for req in batch.requests:
             block_table=self.block_manager.req_table[req.request_id]
@@ -97,3 +107,9 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
             for block in blocks:
                 token_ids=block._token_ids
                 migrate_request.add_block_token_ids(token_ids)
+            torch.op.migrate(migrate_request)
+            
+def get_FCFS_scheduler(sche_config:PrefillSchedulerConfig,
+                       parallel_config:ParallelConfig,
+                       cache_config:CacheConfig):
+    return FCFS_PrefillStageScheduler(parallel_config=parallel_config,prefill_scheduler_config=sche_config,cache_config=cache_config)

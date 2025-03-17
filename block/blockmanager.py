@@ -94,12 +94,12 @@ class BlockManager:
     ) -> List[Tuple[int, int]]:
 
         block_table = self.req_table[req.request_id]
-
-        block_table.append_token_ids(
-            token_ids=block_table.get_unseen_token_ids(req._cached_all_token_ids),
-            num_lookahead_slots=num_lookahead_slots,
-            num_computed_slots=req._num_computed_tokens,
-        )
+        if self.can_append_slots(req):
+            block_table.append_token_ids(
+                token_ids=block_table.get_unseen_token_ids(req._cached_all_token_ids),
+                num_lookahead_slots=num_lookahead_slots,
+                num_computed_slots=req._num_computed_tokens,
+            )
     def create_allocator(
         self,
         num_blocks:int,

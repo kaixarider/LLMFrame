@@ -8,6 +8,9 @@ from abc import ABC,abstractmethod
 import huggingface_hub
 from huggingface_hub import (file_exists, hf_hub_download,
                              try_to_load_from_cache)
+import torch
+
+from MixFrame.util import get_cpu_memory,get_gpu_memory
 from transformers.utils import CONFIG_NAME as HF_CONFIG_NAME
 from MixFrame.request.request import BatchedRequests,Request,ScheduleType,MigrateRequests
 import logging
@@ -35,8 +38,10 @@ class CacheConfig:
         self.cpu_swap_space=cpu_swap_space
     
     def get_num_blocks(self):
-        self.num_gpu_blocks=
-        self.num_cpu_blocks=
+        gpu_memory=get_gpu_memory(torch.cuda.current_device())*self.gpu_memory_utilization
+        cpu_memory=get_cpu_memory()
+        self.num_gpu_blocks=gpu_memory/self.block_size
+        self.num_cpu_blocks=cpu_memory/self.block_size
 class ParallelConfig:
     '''config numbers of parallel nodes'''
     def __init__(
@@ -292,10 +297,10 @@ class SchedulerConfig(ABC):
     
 class PrefillSchedulerConfig(SchedulerConfig):
     def __init__(self, 
-                 parallel_config, 
-                 policy, 
-                 max_batch_size, 
-                 max_token_num_each_req):
+                 parallel_config:ParallelConfig, 
+                 policy:'str', 
+                 max_batch_size:int, 
+                 max_token_num_each_req:int):
         self.parallel_config=parallel_config
         assert policy in ['fcfs'],"prefill scheduler \
         only supports fcfs policy"

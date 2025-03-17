@@ -3,7 +3,8 @@ schedule policy'''
 from abc import ABC,abstractmethod
 from typing import Tuple,List
 import asyncio
-from MixFrame.config import ParallelConfig,DisParallelConfig
+
+from MixFrame.config import ParallelConfig,DisParallelConfig,ModelConfig
 from MixFrame.config import DecodeSchedulerConfig,PrefillSchedulerConfig,SchedulerConfig
 from MixFrame.scheduler.decode_stage_scheduler import DecodeStageScheduler,FCFS_DecodeStageScheduler
 from MixFrame.scheduler.prefill_stage_scheduler import PrefillStageScheduler, FCFS_PrefillStageScheduler
@@ -14,6 +15,12 @@ from MixFrame.tokenizer.tokenizer import get_tokenizer
 class SingleStepEngine(ABC):
     @abstractmethod
     def getscheduler(self,sche_config:SchedulerConfig)->(DecodeStageScheduler|PrefillStageScheduler):
+        raise NotImplementedError
+    @abstractmethod
+    def load_model(self,model_config:ModelConfig):
+        raise NotImplementedError
+    @abstractmethod
+    async def recv_request(self):
         raise NotImplementedError
     @abstractmethod
     def __init__(self,sche_config:SchedulerConfig,para_config:DisParallelConfig)->None:
@@ -28,8 +35,7 @@ class PrefillEngine(SingleStepEngine):
         self.para_config=para_config
         self.prefill_scheduler=self.getscheduler(prefill_sche_config)
     
-    def add_request(self,request:Request):
-        self.prefill_scheduler.add_request(request)
+    async 
 
     
 class DecodeEngine(SingleStepEngine):
@@ -41,4 +47,10 @@ class DecodeEngine(SingleStepEngine):
     def add_request(self,Mig_request:MigrateRequests):
         self.decode_scheduler.add_request(Mig_request)
             
-        
+class CoTEngine(SingleStepEngine):
+    def __init__(self,CoT_sche_config,para_config,model_config)->None:
+        return
+    
+class ResponseEngine(SingleStepEngine):
+    def __init__(self,Response_sche_config,para_config,model_config)->None:
+        return

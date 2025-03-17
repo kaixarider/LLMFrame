@@ -114,6 +114,7 @@ class BatchedRequests:
             self.requests=[]
         else:
             self.requests=requests
+            self._all_tokens=sum(request.get_len() for request in requests)
         if schedule_type==None:
             self._judge_scheduled_type()
         else:
@@ -123,6 +124,7 @@ class BatchedRequests:
     
     def add_request(self,request:Request):
         self.requests.append(request)
+        self._all_tokens+=request.get_len()
         return
     
     def pop_finished_request(self)->List[Request]:
@@ -132,7 +134,8 @@ class BatchedRequests:
                 finish_requests.append(request)
             else:
                 unfinished_requests.append(request)
-        self.requests=finish_requests
+        self.requests=unfinished_requests
+        self._all_tokens=sum(request.get_len() for request in unfinished_requests)
         return finish_requests
     
     def schedule_type(self)->ScheduleType:

@@ -501,3 +501,22 @@ class BlockTable:
                 self._allocator.allocate_mutable_block(
                     prev_block=self._blocks[-1],
                     location=BlockLocation.GPU))
+    def _chunk_token_blocks_for_append(
+            self, token_ids: List[int]) -> List[List[int]]:
+        """Split the token ids into block-sized chunks so they can be easily
+        appended to blocks. The first such "token block" may have less token ids
+        than the block size, since the last allocated block may be partially
+        full.
+
+        If no token ids are provided, then no chunks are returned.
+        """
+
+        if not token_ids:
+            return []
+
+        first_chunk_size = self._block_size - (self._num_full_slots %
+                                               self._block_size)
+        token_blocks = [token_ids[:first_chunk_size]]
+        token_blocks.extend(
+            chunk_list(token_ids[first_chunk_size:], self._block_size))
+        return token_blocks
