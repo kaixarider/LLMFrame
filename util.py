@@ -49,10 +49,13 @@ def set_random_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-class ScheduleType(enum.Enum):
+class BatchingType(enum.Enum):
     PD=enum.auto()
     CB=enum.auto()
 
 class InferenceStage(enum.Enum):
     prefill=enum.auto()
     decode=enum.auto()
+
+class ScheduleType(enum.Enum):
+    FCFS=enum.auto()

@@ -1,12 +1,17 @@
 import torch.distributed as dist
 import torch
-from typing import Tuple
+from typing import Tuple,List
 import logging
+import time
+import enum
+from typing import Dict,List
 from MixFrame.config import DisParallelConfig,ParallelConfig,CacheConfig,ModelConfig,SchedulerConfig
 from MixFrame.util import InferenceStage,set_random_seed,get_gpu_memory,MB,GB
-
+from MixFrame.request.request import Request
+from MixFrame.util import InferenceStage
+Req_id=int
+duration=float
 logger = logging.getLogger(__name__)
-
 class Worker:
     def __init__(self,
                  worker_id:int,
@@ -29,9 +34,13 @@ class Worker:
         self.model_config=model_config
         self.k_cache=None
         self.v_cache=None
-        
+        #profile
+        self.prefill_duration:dict[Req_id,duration]={}
+        self.decode_duration:dict[Req_id,duration]={}
+        self.sample:dict[Req_id,duration]={}
     def init_model(self)->None:
         set_random_seed(self.model_config.seed)
+        #include load model weight and init parallel environment
         
     def init_kv_cache_and_swap(self,num_gpu_blocks:int,num_cpu_blocks):
         kv_cache_shape = (
@@ -115,3 +124,55 @@ class Worker:
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
         return num_gpu_blocks, num_cpu_blocks
+    
+    
+
+    def forward(
+        self,
+        request_ids: List[int],
+        input_tokens_batched,
+        first_token_indexes,
+        block_table,
+    ) -> List[int]:
+        """Run one step of inference on the batch of requests."""
+
+        start = time.time()
+        # Check whether synchronization is necessary
+        for request_id in request_ids:
+            if request_id in self.swap_event_table:
+                # We let the current stream wait for the swap event
+                # This is non-blocking (It just stop the current stream instead
+                # of chocking the CPU)
+                self.swap_event_table[request_id].wait(torch.cuda.current_stream())
+                self.swap_event_table.pop(request_id, None)
+        self.blocked_swapping_time += time.time() - start
+
+        start = time.time()
+        # print(f"Worker {self.stage}.#{self.worker_id} Step begin")
+        # run forward
+        generated_tokens_ids = self.model.forward(
+            input_tokens_batched,
+            first_token_indexes,
+            self.k_cache,
+            self.v_cache,
+            block_table,
+        )
+        execution_time = time.time() - start
+        self._profile_execution_time(execution_time=execution_time,request_ids=request_ids)
+        return generated_tokens_ids
+    
+    def _profile_execution_time(self,execution_time:float,request_ids:List[Req_id]):
+        for req_id in request_ids:
+            if self.stage==InferenceStage.prefill:
+                if req_id in self.prefill_duration:
+                    self.prefill_duration[req_id]+=execution_time
+                else:
+                    self.prefill_duration[req_id]=execution_time
+            else:
+                if req_id in self.decode_duration:
+                    self.decode_duration[req_id]+=execution_time
+                else:
+                    self.decode_duration[req_id]=execution_time
+        # print(f"Worker {self.stage}.#{self.worker_id} Step end")
+
+        

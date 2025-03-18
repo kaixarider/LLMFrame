@@ -1,7 +1,7 @@
 from abc import ABC,abstractmethod
 from typing import List
 import torch
-from MixFrame.request.request import Request,BatchedRequests,ScheduleType,MigrateRequest,RequestStatus
+from MixFrame.request.request import Request,BatchedRequests,BatchingType,MigrateRequest,RequestStatus
 from MixFrame.config import DecodeSchedulerConfig,ParallelConfig,CacheConfig
 from MixFrame.block.blockmanager import BlockManager
 class DecodeStageScheduler(ABC):
@@ -27,18 +27,10 @@ class DecodeStageScheduler(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def select_requests(self)->BatchedRequests:
+    def schedule_requests(self)->BatchedRequests:
         '''select requests for execution,prefill or continous batching'''
         raise NotImplementedError
-    @abstractmethod
-    def CB_or_PD(self,BatchedRequests:BatchedRequests)->ScheduleType:
-        '''determine whether continuous batching(CB) or Prefill Decode Disaggregation(PD)
-        suit a batch'''
-        raise NotImplementedError
-    @abstractmethod
-    def schedule_requests(self)->BatchedRequests:
-        '''determine whether this request can be scheduled'''
-        raise NotImplementedError
+
     @abstractmethod
     def _convert_migrate_requests(self,Mig_request:MigrateRequest)->Request:
         raise NotImplementedError

@@ -4,7 +4,7 @@ import enum
 from MixFrame.request.sampling_parameter import SamplingParemeters
 from MixFrame.config import ParallelConfig
 from MixFrame.block.blocktable import Block
-from MixFrame.util import ScheduleType
+from MixFrame.util import BatchingType
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,15 @@ class Request:
         self._update_cached_all_tokens()
         #schedule_type
         self.schedule_type=None
+        #profile
+        self.prefill_time=0
+        self.prefill_attention=0
+        self.prefill_gemm=0
+        self.decode_time=0
+        self.decode_attetnion=0
+        self.decode_gemm=0
+        self.decode_sample=0
+        
     def get_priority(self)->int:
         return self.priority
     
@@ -66,7 +75,8 @@ class Request:
         self.finish_prefill_time=time
     def get_output_len(self)->int:
         return len(self.generated_token_ids)
-    
+    def get_input_len(self)->int:
+        return len(self.prompt_token_ids)
     def _check_stop_condition(self)->bool:
         if self.get_output_len()>=self.sampling_parameters.max_tokens:
             self.is_finish=True
@@ -107,7 +117,7 @@ class Request:
         self._cached_all_token_ids: List[int] = list(self.prompt_token_ids +
                                                      self.generated_token_ids)
         
-    def set_schedule_type(self,value:ScheduleType):
+    def set_schedule_type(self,value:BatchingType):
         self.schedule_type=value
 
 class BatchedRequests:
@@ -139,7 +149,7 @@ class BatchedRequests:
 class MigrateRequest:
     def __init__(self,req:Request,
                  para_config:ParallelConfig)->None:
-        assert req.schedule_type==ScheduleType.PD,"continous batching shouldn't be migrated"
+        assert req.schedule_type==BatchingType.PD,"continous batching shouldn't be migrated"
         self.req=req
         self.para_config=para_config
         self.blocks:List[List[int]]=[]

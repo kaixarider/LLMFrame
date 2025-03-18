@@ -48,22 +48,22 @@ class ParallelConfig:
       self,
       tp_size:int=1,#tensor_parallel
       tp_rank:int=0,
-      dp_size:int=1,#data_parallel
-      dp_rank:int=0
+      pp_size:int=1,#data_parallel
+      pp_rank:int=0
     )->None:
         self.tp_size=tp_size
         self.tp_rank=tp_rank
-        self.dp_size=dp_size
-        self.dp_rank=dp_rank
+        self.pp_size=pp_size
+        self.pp_rank=pp_rank
         
-        self.world_size=dp_size*tp_size
+        self.world_size=pp_size*tp_size
         self.use_parallel=self.world_size>1
     
     def show_config(self)->Dict:
       return {"tp_size":self.tp_size,
               "tp_rank":self.tp_rank,
-              "dp_size":self.dp_size,
-              "dp_rank":self.dp_size}
+              "pp_size":self.pp_size,
+              "pp_rank":self.pp_size}
     
 class DisParallelConfig:
     def __init__(
@@ -145,8 +145,21 @@ Args:
                 and (self.hf_text_config.model_type in \
                     ('deepseek_v2', 'deepseek_v3'))\
                 and (self.hf_text_config.kv_lora_rank is not None)
-
-
+    def get_model_size_in_bytes(self,para_config:ParallelConfig)->int:
+        total_params = (
+            self.hf_config.vocab_size * self.get_hidden_size()  # vocab embed
+            + self.get_max_model_len() * self.get_hidden_size()  # position embed
+            + 4
+            * self.get_num_layers(para_config)
+            * (self.get_hidden_size() ** 2)  # attention
+            / para_config.tensor_parallel_size # attention is divided by tp
+            + 8
+            * self.get_num_layers(para_config)
+            * (self.get_hidden_size() ** 2)  # FFN
+            / para_config.tensor_parallel_size # FFN is divided by tp
+            + 5 * self.get_num_layers(para_config) * self.get_hidden_size()  # bias
+        ) 
+        return total_params * self.get_dtype_size()
     def get_head_size(self) -> int:
         # TODO remove hard code
         if self.is_deepseek_mla:
@@ -227,20 +240,20 @@ Args:
         # case where the number of KV heads is smaller than the tensor
         # parallel size so each GPU has at least one KV head.
         return max(1,
-                   total_num_kv_heads // parallel_config.tensor_parallel_size)
+                   total_num_kv_heads // parallel_config.tp_size)
 
     def get_num_attention_heads(self,
                                 parallel_config: "ParallelConfig") -> int:
         num_heads = getattr(self.hf_text_config, "num_attention_heads", 0)
-        return num_heads // parallel_config.tensor_parallel_size
+        return num_heads // parallel_config.tp_size
 
     def get_layers_start_end_indices(
             self, parallel_config: "ParallelConfig") -> Tuple[int, int]:
         from vllm.distributed.utils import get_pp_indices
         total_num_hidden_layers = getattr(self.hf_text_config,
                                           "num_hidden_layers", 0)
-        pp_rank = parallel_config.rank // parallel_config.tensor_parallel_size
-        pp_size = parallel_config.pipeline_parallel_size
+        pp_rank = parallel_config.rank // parallel_config.tp_size
+        pp_size = parallel_config.pp_size
         start, end = get_pp_indices(total_num_hidden_layers, pp_rank, pp_size)
         return start, end
 
@@ -289,7 +302,10 @@ Args:
         else:
             raise NotImplementedError(f"dtype {self.dtype} not supported")
 
-
+    def get_torch_dtype(self):
+        match self.dtype:
+            case 'fp16':return torch.half
+            case 'fp32':return torch.float32
     
   
 class SchedulerConfig(ABC):

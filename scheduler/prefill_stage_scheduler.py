@@ -3,10 +3,10 @@ from typing import List
 
 import torch
 
-from MixFrame.request.request import Request,BatchedRequests,ScheduleType,MigrateRequest
+from MixFrame.request.request import Request,BatchedRequests,MigrateRequest
 from MixFrame.config import PrefillSchedulerConfig,ParallelConfig,CacheConfig
 from MixFrame.block.blockmanager import BlockManager
-from MixFrame.util import ScheduleType
+from MixFrame.util import BatchingType
     
 class PrefillStageScheduler(ABC):
     '''Prefill stage scheduelr schedules requests to prefill,
@@ -35,7 +35,7 @@ class PrefillStageScheduler(ABC):
         '''select requests for execution,prefill or continous batching'''
         raise NotImplementedError
     @staticmethod
-    def _CB_or_PD(req:Request,sche_type:ScheduleType)->None:
+    def _CB_or_PD(req:Request,sche_type:BatchingType)->None:
         '''determine whether continuous batching(CB) or Prefill Decode Disaggregation(PD)
         suit a batch'''
         req.schedule_type=sche_type
@@ -82,9 +82,15 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
         batch=BatchedRequests()
         #select from running queue first,then prefill requests in waiting queue
         for req in self.running_queue:
-            #select decode req
+            if self.prefill_scheduler_config.max_batch_size>len(batch.requests) and \
+                self.prefill_scheduler_config.max_token_num_each_req>req.get_len() and \
+                self.block_manager.can_append_slots(req):
+                    batch.add_request(req)
         for req in self.waiting_queue:
-            #select prefill req
+            if self.prefill_scheduler_config.max_batch_size>len(batch.requests) and \
+                self.prefill_scheduler_config.max_token_num_each_req>req.get_len() and \
+                self.block_manager.can_allocate(req):
+                    batch.add_request(req)
         return batch
     
     def _convert_request_to_Migrequest(self,req:Request)->None:
@@ -98,7 +104,7 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
         self.block_manager.free(req)
         self.migrate_queue.append(migrate_request)
         return 
-            
+
 def get_FCFS_prefill_scheduler(sche_config:PrefillSchedulerConfig,
                        parallel_config:ParallelConfig,
                        cache_config:CacheConfig):

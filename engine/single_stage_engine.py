@@ -13,6 +13,7 @@ from MixFrame.worker.worker import Worker
 from MixFrame.tokenizer.tokenizer import get_tokenizer
 class SchedulerType(enum.Enum):
     FCFS=enum.auto()
+
 class SingleStepEngine(ABC):
     @abstractmethod
     def getscheduler(self)->(DecodeStageScheduler|PrefillStageScheduler):
