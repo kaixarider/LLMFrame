@@ -4,6 +4,7 @@ from typing import Tuple,List
 import logging
 import time
 import enum
+
 from typing import Dict,List
 from MixFrame.config import DisParallelConfig,ParallelConfig,CacheConfig,ModelConfig,SchedulerConfig
 from MixFrame.util import InferenceStage,set_random_seed,get_gpu_memory,MB,GB
@@ -14,35 +15,42 @@ duration=float
 logger = logging.getLogger(__name__)
 class Worker:
     def __init__(self,
-                 worker_id:int,
                  gpu_id:int,
                  stage:InferenceStage,
-                 parallel_config:DisParallelConfig,
+                 parallel_config:ParallelConfig,
                  cache_config:CacheConfig,
                  sche_config:SchedulerConfig,
-                 model_config:ModelConfig,
-                 tp_rank:int,
-                 pp_rank:int):
-        self.worker_id=worker_id
+                 model_config:ModelConfig):
         self.stage=stage
         self.parallel_config=parallel_config
         self.cache_config=cache_config
         self.schedule_config=sche_config
-        self.tp_rank=tp_rank
-        self.pp_rank=pp_rank
         self.gpu_id=gpu_id
+       
+        tp_size=parallel_config.tp_size
+        pp_size=parallel_config.pp_rank
+        tp_rank=parallel_config.tp_rank
+        pp_rank=parallel_config.pp_rank
+
+        self.worker_id=tp_size*pp_rank+tp_rank
+        self.tp_size=tp_size
+        self.pp_size=pp_size
+        self.world_size=tp_size*pp_size
         self.model_config=model_config
         self.k_cache=None
         self.v_cache=None
+        self.swap_event_table:Dict[int,torch.cuda.Event]={}
         #profile
         self.prefill_duration:dict[Req_id,duration]={}
         self.decode_duration:dict[Req_id,duration]={}
         self.sample:dict[Req_id,duration]={}
+        
     def init_model(self)->None:
         set_random_seed(self.model_config.seed)
         #include load model weight and init parallel environment
         
-    def init_kv_cache_and_swap(self,num_gpu_blocks:int,num_cpu_blocks):
+    def init_kv_cache_and_swap(self):
+        num_gpu_blocks,num_cpu_blocks=self._profile_num_available_blocks()
         kv_cache_shape = (
             num_gpu_blocks,
             self.model_config.get_num_layers(self.parallel_config),
@@ -67,27 +75,8 @@ class Worker:
         )
         torch.cuda.synchronize()
     
-    def _get_block_size_in_bytes(
-        self,
-        block_size: int,
-        model_config: ModelConfig,
-        parallel_config: ParallelConfig,
-    ) -> int:
-        # the shape of one slot in k/v cache is [num_layers, num_local_heads, block_size, head_dim]
-        num_layers = model_config.get_num_layers(parallel_config)
-        num_heads = model_config.get_num_kv_heads(parallel_config)
-        head_dim = model_config.get_head_size()
-
-        key_cache_size = num_layers * num_heads * block_size * head_dim
-        total = key_cache_size * 2
-        dtype_size = model_config.get_dtype_size()
-        return total * dtype_size
-    
-    @torch.inference_mode()
     def _profile_num_available_blocks(
         self,
-        block_size: int,
-        gpu_memory_utilization: float,
         cpu_swap_space: int,
     ) -> Tuple[int, int]:
         # Profile the memory usage of the model and get the maximum number of
@@ -95,37 +84,23 @@ class Worker:
 
         # Profile memory usage with max_batch_size requests and the total
         # number of tokens equal to max_tokens_per_batch.
-        total_gpu_memory = get_gpu_memory()
-        peak_runtime_memory = (
-            total_gpu_memory * 0.01
-            + self.model_config.get_model_size_in_bytes(
-                parallel_config=self.parallel_config
-            )
-        )
-        logger.info(f"runtime peak memory: {peak_runtime_memory / GB:.3f} GB")
-        logger.info(f"total GPU memory: {total_gpu_memory / GB:.3f} GB")
-        block_size_in_bytes = self._get_block_size_in_bytes(
-            block_size, self.model_config, self.parallel_config
-        )
-        logger.info(
-            f"kv cache size for one token: {block_size_in_bytes / block_size / MB:.5f} MB"
-        )
-        num_gpu_blocks = int(
-            (total_gpu_memory * gpu_memory_utilization - peak_runtime_memory)
-            // block_size_in_bytes
-        )
-        num_cpu_blocks = int(cpu_swap_space // block_size_in_bytes)
-        num_gpu_blocks = max(num_gpu_blocks, 0)
-        logger.info(f"num_gpu_blocks: {num_gpu_blocks}")
-        num_cpu_blocks = max(num_cpu_blocks, 0)
-        logger.info(f"num_cpu_blocks: {num_cpu_blocks}")
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
 
-        # Reset the seed to ensure that the random state is not affected by
-        # the model initialization and profiling.
-        set_random_seed(self.model_config.seed)
+        free_memory_pre_profile, total_gpu_memory = torch.cuda.mem_get_info()
+        memory_for_current_instance = total_gpu_memory * \
+            self.cache_config.gpu_memory_utilization
+        cache_block_size=self.cache_config.get_block_size_in_bytes()
+        if cache_block_size == 0:
+            num_gpu_blocks = 0
+            num_cpu_blocks = 0
+        else:
+            num_gpu_blocks = int(memory_for_current_instance // cache_block_size)
+            num_cpu_blocks = int(cpu_swap_space//
+                                 cache_block_size)
+        num_gpu_blocks = max(num_gpu_blocks, 0)
+        num_cpu_blocks = max(num_cpu_blocks, 0)
         return num_gpu_blocks, num_cpu_blocks
-    
-    
 
     def forward(
         self,
@@ -173,6 +148,29 @@ class Worker:
                     self.decode_duration[req_id]+=execution_time
                 else:
                     self.decode_duration[req_id]=execution_time
-        # print(f"Worker {self.stage}.#{self.worker_id} Step end")
 
+    
+    def init_distributed_environment(
+        self,
+        distributed_init_method: str = "env://",
+        local_rank: int = -1,
+        backend: str = "nccl",
+    ):
+        logger.debug(
+            "world_size=%d rank=%d local_rank=%d "
+            "distributed_init_method=%s backend=%s", self.world_size, self.worker_id, local_rank,
+            distributed_init_method, backend)
+        if not torch.distributed.is_initialized():
+            assert distributed_init_method is not None, (
+                "distributed_init_method must be provided when initializing "
+                "distributed environment")
+            # this backend is used for WORLD
+            torch.distributed.init_process_group(
+                backend=backend,
+                init_method=distributed_init_method,
+                world_size=self.world_size,
+                rank=self.worker_id)
+
+
+        
         

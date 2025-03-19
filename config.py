@@ -36,12 +36,21 @@ class CacheConfig:
         self.max_num_blocks_per_req=max_num_blocks_per_req
         self.gpu_memory_utilization=gpu_memory_utilization
         self.cpu_swap_space=cpu_swap_space
+        
     
-    def get_num_blocks(self):
-        gpu_memory=get_gpu_memory(torch.cuda.current_device())*self.gpu_memory_utilization
-        cpu_memory=get_cpu_memory()
-        self.num_gpu_blocks=gpu_memory/self.block_size
-        self.num_cpu_blocks=cpu_memory/self.block_size
+    def get_block_size_in_bytes(self,model_config:'ModelConfig',parallel_config:'ParallelConfig'):
+        num_kv_heads=model_config.get_num_kv_heads(parallel_config)
+        head_size=model_config.get_head_size()
+        num_layers=model_config.get_num_layers(parallel_config)
+        key_cache_entry = num_kv_heads * head_size
+        value_cache_entry = key_cache_entry if not model_config.use_mla else 0
+        total = num_layers * self.block_size * \
+            (key_cache_entry + value_cache_entry)
+
+        dtype_size = model_config.get_dtype_size()
+        return dtype_size * total
+
+    
 class ParallelConfig:
     '''config numbers of parallel nodes'''
     def __init__(
@@ -109,6 +118,7 @@ Args:
         self.hf_config=self._get_hf_config()
         self.hf_text_config=self._get_hf_text_config(self.hf_config)
         sliding_window = getattr(self.hf_text_config, "sliding_window", None)
+        
     def _get_hf_config(self):
         try:
             config = AutoConfig.from_pretrained(
