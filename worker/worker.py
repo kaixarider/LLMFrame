@@ -8,7 +8,7 @@ import enum
 from typing import Dict,List
 from MixFrame.config import DisParallelConfig,ParallelConfig,CacheConfig,ModelConfig,SchedulerConfig
 from MixFrame.util import InferenceStage,set_random_seed,get_gpu_memory,MB,GB
-from MixFrame.request.request import Request
+from MixFrame.request.request import Request,BatchedRequests
 from MixFrame.util import InferenceStage
 Req_id=int
 duration=float
@@ -171,6 +171,12 @@ class Worker:
                 world_size=self.world_size,
                 rank=self.worker_id)
 
+    def clear_req(self,req:Request):
+        self.swap_event_table.pop(req.request_id)
+    
+    def clear_batch(self,batch:BatchedRequests):
+        for req in batch:
+            self.clear_req(req)
 
         
         

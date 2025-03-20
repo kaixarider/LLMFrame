@@ -14,9 +14,24 @@ class PrefillStageScheduler(ABC):
     @abstractmethod
     def __init__(self,
                  parallel_config:ParallelConfig,
-                 prefill_scheduler_config:PrefillSchedulerConfig):
+                 prefill_scheduler_config:PrefillSchedulerConfig,
+                 cache_config:CacheConfig):
         '''initiate prefill stage scheduler'''
-        raise NotImplementedError
+        assert prefill_scheduler_config.policy=='fcfs',"FCFS scheduler should be served for \
+            fcfs policy!"
+        self.parallel_config=parallel_config
+        self.prefill_scheduler_config=prefill_scheduler_config
+        self.block_manager=BlockManager(block_size=cache_config.block_size,num_gpu_blocks=cache_config.num_gpu_blocks,
+                                        num_cpu_blocks=cache_config.num_cpu_blocks)# to be finished
+        '''
+        four queues.
+        -waiting queue:requests waiting to be prefilled
+        -running queue:requests that suit CB thus waiting for decoding
+        -migrate_queue:finished prefilled but waiting to be decoded'''
+        self.waiting_queue:List[Request]=[]
+        self.running_queue:List[Request]=[]
+        self.migrate_queue:List[MigrateRequest]=[]
+        self.swap_queue=[]
     @abstractmethod
     def add_request(self,request:Request)->None:
         '''add_request to waiting queue'''
@@ -42,26 +57,16 @@ class PrefillStageScheduler(ABC):
     @abstractmethod
     def _convert_request_to_Migrequest(self,request:Request):
         raise NotImplementedError
+    @abstractmethod
+    def clear_req(self,request:Request)->None:
+        raise NotImplementedError
 class FCFS_PrefillStageScheduler(PrefillStageScheduler):
     def __init__(self,
                  parallel_config:ParallelConfig,
                  prefill_scheduler_config:PrefillSchedulerConfig,
                  cache_config:CacheConfig)->None:
-        assert prefill_scheduler_config.policy=='fcfs',"FCFS scheduler should be served for \
-            fcfs policy!"
-        self.parallel_config=parallel_config
-        self.prefill_scheduler_config=prefill_scheduler_config
-        self.block_manager=BlockManager(block_size=cache_config.block_size,num_gpu_blocks=cache_config.num_gpu_blocks,
-                                        num_cpu_blocks=cache_config.num_cpu_blocks)# to be finished
-        '''
-        four queues.
-        -waiting queue:requests waiting to be prefilled
-        -running queue:requests that suit CB thus waiting for decoding
-        -migrate_queue:finished prefilled but waiting to be decoded'''
-        self.waiting_queue:List[Request]=[]
-        self.running_queue:List[Request]=[]
-        self.migrate_queue:List[MigrateRequest]=[]
-        self.swap_queue=[]
+        super().__init__(parallel_config=parallel_config,prefill_scheduler_config=prefill_scheduler_config,
+                         cache_config=cache_config)
     
     def add_request(self, request:Request)->None:
         self.waiting_queue.append(request)
@@ -104,8 +109,15 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
         self.block_manager.free(req)
         self.migrate_queue.append(migrate_request)
         return 
+    
+    def clear_req(self, req:Request)->None:
+        self.block_manager.free(req)
 
-def get_FCFS_prefill_scheduler(sche_config:PrefillSchedulerConfig,
+def get_prefill_scheduler(sche_config:PrefillSchedulerConfig,
                        parallel_config:ParallelConfig,
-                       cache_config:CacheConfig):
-    return FCFS_PrefillStageScheduler(parallel_config=parallel_config,prefill_scheduler_config=sche_config,cache_config=cache_config)
+                       cache_config:CacheConfig)->PrefillStageScheduler:
+    match sche_config.policy:
+        case "fcfs":
+            return FCFS_PrefillStageScheduler(parallel_config=parallel_config,prefill_scheduler_config=sche_config,cache_config=cache_config)
+        case _:
+            raise ValueError("no such prefill schedule policy")

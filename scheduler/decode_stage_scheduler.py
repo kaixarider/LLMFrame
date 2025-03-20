@@ -34,7 +34,9 @@ class DecodeStageScheduler(ABC):
     @abstractmethod
     def _convert_migrate_requests(self,Mig_request:MigrateRequest)->Request:
         raise NotImplementedError
-    
+    @abstractmethod
+    def clear_req(self,req:Request)->None:
+        raise NotImplementedError
 class FCFS_DecodeStageScheduler(DecodeStageScheduler):
     def __init__(self,parallel_config:ParallelConfig,
                  decode_scheduler_config:DecodeSchedulerConfig,
@@ -83,11 +85,17 @@ class FCFS_DecodeStageScheduler(DecodeStageScheduler):
             if _can_schedule(req):
                 batch.add_request(req)
         return batch
-            
-def get_FCFS_decode_scheduler(parallel_config:ParallelConfig,
+    def clear_req(self, req:Request)->None:
+        self.block_manager.free(req)
+        return        
+def get_decode_scheduler(parallel_config:ParallelConfig,
                  decode_scheduler_config:DecodeSchedulerConfig,
-                 cache_config:CacheConfig)->FCFS_DecodeStageScheduler:
-    return FCFS_DecodeStageScheduler(parallel_config=parallel_config,
+                 cache_config:CacheConfig)->DecodeStageScheduler:
+    match decode_scheduler_config.policy:
+        case 'fcfs':
+            return FCFS_DecodeStageScheduler(parallel_config=parallel_config,
                                      decode_scheduler_config=decode_scheduler_config,
                                      cache_config=cache_config)
     
+        case _:
+            raise ValueError("No such decode schedule policy.")
