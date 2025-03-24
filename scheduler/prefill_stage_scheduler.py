@@ -5,7 +5,7 @@ import torch
 
 from MixFrame.request.request import Request,BatchedRequests,MigrateRequest
 from MixFrame.config import PrefillSchedulerConfig,ParallelConfig,CacheConfig
-from MixFrame.block.blockmanager import BlockManager
+from MixFrame.block.blockmanager import BlockManager,AllocStatus
 from MixFrame.util import BatchingType
     
 class PrefillStageScheduler(ABC):
@@ -15,14 +15,16 @@ class PrefillStageScheduler(ABC):
     def __init__(self,
                  parallel_config:ParallelConfig,
                  prefill_scheduler_config:PrefillSchedulerConfig,
-                 cache_config:CacheConfig):
+                 cache_config:CacheConfig,
+                 num_gpu_blocks:int,
+                 num_cpu_blocks:int):
         '''initiate prefill stage scheduler'''
         assert prefill_scheduler_config.policy=='fcfs',"FCFS scheduler should be served for \
             fcfs policy!"
         self.parallel_config=parallel_config
         self.prefill_scheduler_config=prefill_scheduler_config
-        self.block_manager=BlockManager(block_size=cache_config.block_size,num_gpu_blocks=cache_config.num_gpu_blocks,
-                                        num_cpu_blocks=cache_config.num_cpu_blocks)# to be finished
+        self.block_manager=BlockManager(block_size=cache_config.block_size,num_gpu_blocks=num_gpu_blocks,
+                                        num_cpu_blocks=num_cpu_blocks)# to be finished
         '''
         four queues.
         -waiting queue:requests waiting to be prefilled
@@ -41,10 +43,7 @@ class PrefillStageScheduler(ABC):
     def abort_request(self,request_id:int)->None:
         '''abort request that can't be executed'''
         raise NotImplementedError
-    @abstractmethod
-    def _clear_request(self,request_id:int)->None:
-        '''clear request migrated for decode'''
-        raise NotImplemented
+
     @abstractmethod
     def select_requests(self)->BatchedRequests:
         '''select requests for execution,prefill or continous batching'''
@@ -64,21 +63,23 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
     def __init__(self,
                  parallel_config:ParallelConfig,
                  prefill_scheduler_config:PrefillSchedulerConfig,
-                 cache_config:CacheConfig)->None:
+                 cache_config:CacheConfig,
+                 num_gpu_blocks:int,
+                 num_cpu_blocks:int)->None:
         super().__init__(parallel_config=parallel_config,prefill_scheduler_config=prefill_scheduler_config,
-                         cache_config=cache_config)
+                         cache_config=cache_config,num_gpu_blocks=num_gpu_blocks,num_cpu_blocks=num_cpu_blocks)
     
     def add_request(self, request:Request)->None:
         self.waiting_queue.append(request)
-        self.block_manager.allocate(request)
         
-    def abort_request(self, request_id:int)->None:
+        
+    def abort_request(self, req:Request)->None:
         for (i,request) in enumerate(self.waiting_queue):
-            if request_id==request.request_id:
+            if req.request_id==request.request_id:
                 del self.waiting_queue[i]
                 return
         for (i,request) in enumerate(self.running_queue):
-            if request_id==request.request_id:
+            if req.request_id==request.request_id:
                 self.block_manager.free(request)
                 del self.running_queue[i]
                 return
@@ -94,8 +95,13 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
         for req in self.waiting_queue:
             if self.prefill_scheduler_config.max_batch_size>len(batch.requests) and \
                 self.prefill_scheduler_config.max_token_num_each_req>req.get_len() and \
-                self.block_manager.can_allocate(req):
+                self.block_manager.can_allocate(req)==AllocStatus.OK:
                     batch.add_request(req)
+                    self.block_manager.allocate(req)
+            if self.block_manager.can_allocate(req)==AllocStatus.NO or \
+                not self.prefill_scheduler_config.max_batch_size>len(batch.requests) or\
+                not self.prefill_scheduler_config.max_token_num_each_req>req.get_len():
+                    self.abort_request(req)
         return batch
     
     def _convert_request_to_Migrequest(self,req:Request)->None:
@@ -115,9 +121,15 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
 
 def get_prefill_scheduler(sche_config:PrefillSchedulerConfig,
                        parallel_config:ParallelConfig,
-                       cache_config:CacheConfig)->PrefillStageScheduler:
+                       cache_config:CacheConfig,
+                       num_gpu_blocks:int,
+                       num_cpu_blocks:int)->PrefillStageScheduler:
     match sche_config.policy:
         case "fcfs":
-            return FCFS_PrefillStageScheduler(parallel_config=parallel_config,prefill_scheduler_config=sche_config,cache_config=cache_config)
+            return FCFS_PrefillStageScheduler(parallel_config=parallel_config,
+                                              prefill_scheduler_config=sche_config,
+                                              cache_config=cache_config,
+                                              num_gpu_blocks=num_gpu_blocks,
+                                              num_cpu_blocks=num_cpu_blocks)
         case _:
             raise ValueError("no such prefill schedule policy")

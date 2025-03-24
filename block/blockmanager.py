@@ -37,11 +37,22 @@ class BlockManager:
 
         self.watermark = watermark
         assert watermark >= 0.0
-        self.watermark_blocks = int(watermark * num_gpu_blocks)
-        self.allocator=self.create_allocator((num_gpu_blocks,num_cpu_blocks,block_size))
+        self.watermark_blocks = int(watermark * num_gpu_blocks) 
+        #print(self.watermark_blocks)
         self.req_table:Dict[ReqId,BlockTable]={}#Record the blocks a req use.Migrate corresponding blocks
-    def can_allocate(self,req:Request,ahead_slots:int=0):
-        num_required_blocks = BlockTable.get_num_required_blocks(req._update_cached_all_tokens,self.block_size,ahead_slots)
+    def can_allocate(self,req:Request,ahead_slots:int=0)->AllocStatus:
+        num_required_blocks = BlockTable.get_num_required_blocks(req._update_cached_all_tokens(),self.block_size,ahead_slots)
+        num_free_gpu_blocks = self.gpu_block_allocator.get_num_free_block()
+        #print(f"test req is {req.request_id},required block num is {num_required_blocks},num free block is {num_free_gpu_blocks}")
+        if (self.num_total_gpu_blocks - num_required_blocks
+                < self.watermark_blocks):
+            return AllocStatus.NO
+        if num_free_gpu_blocks - num_required_blocks >= self.watermark_blocks:
+            return AllocStatus.OK
+        else:
+            return AllocStatus.LATER
+    def can_allocate_Migreq(self,Migreq:MigrateRequest,ahead_slots:int=0)->AllocStatus:
+        num_required_blocks = BlockTable.get_num_required_blocks(Migreq.req._update_cached_all_tokens(),self.block_size,ahead_slots)
         num_free_gpu_blocks = self.gpu_block_allocator.get_num_free_block()
         if (self.num_total_gpu_blocks - num_required_blocks
                 < self.watermark_blocks):
@@ -50,17 +61,16 @@ class BlockManager:
             return AllocStatus.OK
         else:
             return AllocStatus.LATER
-        
     def _get_req_blocktable(self,req:Request)->BlockTable:
         block_table = BlockTable(
-            block_size=self.block_size,block_allocator=self.allocator,max_block_sliding_window=self.sliding_window
+            block_size=self.block_size,block_allocator=self.gpu_block_allocator,max_block_sliding_window=self.sliding_window
         )
         if req.get_input_token_ids():
-            block_table.allocate(req.get_input_token_ids)
+            block_table.allocate(req.get_input_token_ids())
         return block_table
     def _get_Migreq_blocktable(self,req:MigrateRequest)->BlockAllocator:
         block_table = BlockTable(
-            block_size=self.block_size,block_allocator=self.allocator,max_block_sliding_window=self.sliding_window
+            block_size=self.block_size,block_allocator=self.gpu_block_allocator,max_block_sliding_window=self.sliding_window
         )
         block_table._copy_blocks(req.blocks)
         return block_table
@@ -69,6 +79,7 @@ class BlockManager:
         assert not req.request_id in self.req_table.keys(),f"block table of {req.request_id} exists"
         block_table=self._get_req_blocktable(req)
         self.req_table[req.request_id]=block_table
+        
     def allocate_prefilled_req(self,req:MigrateRequest):
         assert not req.req.request_id in self.req_table.keys(),f"block table of {req.req.request_id} exists"
         block_table=self._get_Migreq_blocktable(req)

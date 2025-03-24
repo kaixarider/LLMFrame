@@ -10,9 +10,7 @@ from huggingface_hub import (file_exists, hf_hub_download,
                              try_to_load_from_cache)
 import torch
 
-from MixFrame.util import get_cpu_memory,get_gpu_memory
 from transformers.utils import CONFIG_NAME as HF_CONFIG_NAME
-from MixFrame.request.request import BatchedRequests,Request,ScheduleType,MigrateRequests
 import logging
 logger = logging.getLogger(__name__)
 '''include CacheConfig,ModelConfig,ParallelConfig and SchedulerConfig'''

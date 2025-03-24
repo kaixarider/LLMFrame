@@ -116,7 +116,7 @@ class Request:
     def _update_cached_all_tokens(self):
         self._cached_all_token_ids: List[int] = list(self.prompt_token_ids +
                                                      self.generated_token_ids)
-        
+        return self._cached_all_token_ids
     def set_schedule_type(self,value:BatchingType):
         self.schedule_type=value
 
@@ -125,6 +125,7 @@ class BatchedRequests:
                  requests:Optional[List[Request]]=None):
         if requests==None:
             self.requests=[]
+            self._all_tokens=0
         else:
             self.requests=requests
             self._all_tokens=sum(request.get_len() for request in requests)

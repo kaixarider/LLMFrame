@@ -75,7 +75,7 @@ class SamplingParemeters:
     def _verify_args(self)->None:
         if self.n<1:
             raise ValueError(Sam_err_str+f"n must be at least 1,got {self.n}")
-        if self.best_of<self.n:
+        if self.best_of and self.best_of<self.n:
             raise ValueError(Sam_err_str+f"besr_of must be greater than n.\
                             n is {self.n} and best_of is {self.best_of}")
         if not -2.0 <= self.presence_penalty <= 2.0:

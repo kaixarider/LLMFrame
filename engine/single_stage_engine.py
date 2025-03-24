@@ -55,11 +55,18 @@ class SingleStepEngine(ABC):
         self.cache_config = cache_config
         self.sche_config = sche_config
         self.engine_on_new_step_output_callback = engine_on_new_step_output_callback
-
+        
         self.tokenizer = get_tokenizer(
             tokenizer_name=model_config.tokenizer
         )
-        
+        self.scheduler=PrefillStageScheduler(parallel_config=parallel_config,
+                                             prefill_scheduler_config=sche_config,
+                                             cache_config=cache_config) if stage==InferenceStage.prefill else \
+                        DecodeStageScheduler(
+                            parallel_config=parallel_config,
+                                             prefill_scheduler_config=sche_config,
+                                             cache_config=cache_config
+                        )
         # workers[i][j] is the j-th tensor-parallel worker in pipeline stage i
         self.workers:List[List[Worker]] = []
          # All the batchedrequests that are pushed into the pipeline
@@ -76,7 +83,6 @@ class SingleStepEngine(ABC):
         logger.info(f"Initializing {self.stage.name} kvcaches")
         self.num_gpu_blocks, self.num_cpu_blocks = await self._init_kvcache()
         
-        self.scheduler = self.get_scheduler()
 
         logger.info(f"Scheduler: {self.scheduler}")
 
@@ -119,7 +125,6 @@ class PrefillEngine(SingleStepEngine):
         super().__init__(stage=stage,model_config=model_config,
                          parallel_config=parallel_config,cache_config=cache_config,
                          sche_config=sche_config,engine_on_new_step_output_callback=engine_on_new_step_output_callback)
-        self.scheduler=get_prefill_scheduler(sche_config=self.sche_config,parallel_config=self.parallel_config,cache_config=self.cache_config)
     
 
     def initialize(self):
@@ -195,7 +200,7 @@ class DecodeEngine(SingleStepEngine):
                          parallel_config=parallel_config,cache_config=cache_config,
                          sche_config=sche_config,engine_on_new_step_output_callback=engine_on_new_step_output_callback)
 
-        self.scheduler=get_decode_scheduler(sche_config=self.sche_config,parallel_config=self.parallel_config,cache_config=self.cache_config)
+        
 
 
     def initialize(self):
@@ -221,6 +226,43 @@ class DecodeEngine(SingleStepEngine):
                 fut = rpc.rpc_async(f"worker{dst_rank}", getattr(Worker(), func_name), args=args)
                 futures.append(fut)
         return futures  # 返回所有 Future 句柄
+    
+    async def step(self):
+        batch=self.scheduler.select_requests()
+        '''select requests for batching'''
+        if len(batch) == 0:
+            # Two cases may cause len(batched_requests) == 0:
+            # 1. No request in the waiting queue
+            # 2. No enough free blocks (e.g. the decoding stage is too slow)
+            self.batches_in_pipeline.append(batch)
+            self.batches_ret_futures.append(None)
+            await asyncio.sleep(SLEEP_WHEN_CONTEXT_NO_REQUEST)
+        else:
+            logger.info(f"(context) Forwarding with lengths {[len(request.prompt_token_ids) for request in batch.requests]}")
+            # allocate blocks as needed
+            for req in batch:
+                self.scheduler.block_manager.allocate(req)
+                
+            self.batches_in_pipeline.append(batch)
+            futures=self.remote_call_all_workers_async(
+                "step",
+                
+            )
+            pp_size = self.parallel_config.pp_size
+            tp_size = self.parallel_config.tp_size
+                # only the leader of the last stage return valid output, i.e., generated tokens ids
+            self.batches_ret_futures.append(futures[(pp_size - 1) * tp_size])
+            
+        if len(self.batches_in_pipeline) == self.parallel_config.pp_size:
+            # if the pipeline is full, block until the earliest batch returns
+            # if pipeline parallelism is not used, i.e., pp = 1, this should always be true
+            if self.batches_ret_futures[0] is None:
+                # No request in the batch
+                self.batches_in_pipeline.pop(0)
+                self.batches_ret_futures.pop(0)
+            else:
+                generated_tokens_ids = await self.batches_ret_futures[0]
+        
 class CoTEngine(SingleStepEngine):
     def __init__(self,CoT_sche_config,para_config,model_config)->None:
         return

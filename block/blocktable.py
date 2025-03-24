@@ -70,7 +70,7 @@ class BlockPool:
         self._pool:List[Block]=[]
         for id in range(pool_size):
             self._pool.append(Block(prev_block=None,block_size=block_size,
-                                    block_id=id,token_ids=None,
+                                    block_id=id,token_ids=[],
                                     block_location=pool_location))
     
     def increase_pool(self)->None:
@@ -85,7 +85,7 @@ class BlockPool:
     
     def init_block(self,
                    token_id:List[int],
-                   prev_block:Block,
+                   prev_block:Optional[Block],
                    block_size:int,
                    physical_block_id:Optional[int],
                    )->Block:
@@ -99,7 +99,7 @@ class BlockPool:
             block_size=block_size,
             prev_block=prev_block,
             block_id=physical_block_id,
-            token_id=token_id,
+            token_ids=token_id,
             block_location=self.pool_location
         )
         block.pool_id=pool_id
@@ -163,6 +163,7 @@ class BlockAllocator:
         if block_ids is None:
             block_ids = range(num_blocks)
         self._free_block_indices:Deque[int]=deque(block_ids)
+
         self._all_block_indices = frozenset(block_ids)
         assert len(self._all_block_indices) == num_blocks
         self._block_size = block_size
@@ -192,7 +193,6 @@ class BlockAllocator:
         block=self._block_pool.init_block(
             prev_block=prev_block,
             token_id=[],
-            prev_block=prev_block,
             block_size=self._block_size,
             physical_block_id=block_id,  
         )
@@ -215,6 +215,7 @@ class BlockAllocator:
         num_blocks = len(block_token_ids)
 
         block_ids = []
+        print(self._free_block_indices)
         for i in range(num_blocks):
             block_ids.append(self._allocate_block_id())
 
@@ -222,7 +223,7 @@ class BlockAllocator:
         for i in range(num_blocks):
             prev_block = self._block_pool.init_block(
                 prev_block=prev_block,
-                token_ids=block_token_ids[i],
+                token_id=block_token_ids[i],
                 block_size=self._block_size,
                 physical_block_id=block_ids[i])
             blocks.append(prev_block)
@@ -237,9 +238,10 @@ class BlockAllocator:
             self._block_pool.free_block(block)
         
     def _free_block_id(self, block: Union[Block, BlockId]) -> None:
+        block_id=None
         if isinstance(block, Block):
             block_id = block.block_id
-            block.block_id = None
+            #block.block_id = None
         else:
             block_id = block
         assert block_id is not None
@@ -297,6 +299,7 @@ class BlockTable:
         self._max_block_sliding_window = max_block_sliding_window
         
         self._num_full_slots=self._get_num_token_ids()
+
     @staticmethod
     def get_num_required_blocks(token_ids:List[int],
                                 block_size:int,
@@ -344,6 +347,7 @@ class BlockTable:
         blocks:List[Block]=[]
         block_token_ids = []
         tail_token_ids = []
+        prev_block=None
         for cur_token_ids in chunk_list(token_ids,block_size):
             if len(cur_token_ids) == self._block_size:
                 block_token_ids.append(cur_token_ids)
@@ -351,14 +355,13 @@ class BlockTable:
                 tail_token_ids.append(cur_token_ids)
         if block_token_ids:
             blocks.extend(
-                self._allocator.allocate_immutable_blocks(prev_block,location))
+                self._allocator.allocate_immutable_blocks(prev_block=prev_block,block_token_ids=block_token_ids,device=location))
             prev_block = blocks[-1]
         if tail_token_ids:
             assert len(tail_token_ids) == 1
             cur_token_ids = tail_token_ids[0]
 
-            block = self._allocator.allocate_mutable_block(
-                prev_block=prev_block,)
+            block = self._allocator.allocate_mutable_block(prev_block=prev_block,location=location)
             block.append_token_ids(cur_token_ids)
 
             blocks.append(block)
@@ -368,9 +371,7 @@ class BlockTable:
     def allocate(self,
                  token_ids:List[int],
                  location:BlockLocation=BlockLocation.GPU)->None:
-        blocks = self._allocate_blocks_for_token_ids(prev_block=None,
-                                                     token_ids=token_ids,block_size=self._block_size
-                                                )
+        blocks = self._allocate_blocks_for_token_ids(token_ids=token_ids,block_size=self._block_size,location=location)
         self.update(blocks)
         self._num_full_slots = len(token_ids)
         

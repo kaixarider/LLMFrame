@@ -3,7 +3,7 @@ from typing import List
 import torch
 from MixFrame.request.request import Request,BatchedRequests,BatchingType,MigrateRequest,RequestStatus
 from MixFrame.config import DecodeSchedulerConfig,ParallelConfig,CacheConfig
-from MixFrame.block.blockmanager import BlockManager
+from MixFrame.block.blockmanager import BlockManager,AllocStatus
 class DecodeStageScheduler(ABC):
     '''Prefill stage scheduelr schedules requests to prefill,
     then it determines to decode locally,or migrate'''
@@ -40,10 +40,12 @@ class DecodeStageScheduler(ABC):
 class FCFS_DecodeStageScheduler(DecodeStageScheduler):
     def __init__(self,parallel_config:ParallelConfig,
                  decode_scheduler_config:DecodeSchedulerConfig,
-                 cache_config:CacheConfig):
+                 cache_config:CacheConfig,
+                 num_gpu_blocks:int,
+                 num_cpu_blocks:int):
         self.parallel_config=parallel_config
         self.decode_scheduler_config=decode_scheduler_config 
-        self.block_manager=BlockManager(block_size=cache_config.block_size,num_gpu_blocks=cache_config.num_gpu_blocks,num_cpu_blocks=cache_config.num_cpu_blocks)
+        self.block_manager=BlockManager(block_size=cache_config.block_size,num_gpu_blocks=num_gpu_blocks,num_cpu_blocks=num_cpu_blocks)
         #queues
         
         self.waiting_queue:List[MigrateRequest]=[] #queues containing migrated requests that haven't been transformed to request
@@ -58,9 +60,15 @@ class FCFS_DecodeStageScheduler(DecodeStageScheduler):
                 
     def _add_request(self,Mig_request:MigrateRequest)->None:
         request=self._convert_migrate_requests(Mig_request)
-        self.running_queue.append(request)
-        self.block_manager.allocate_prefilled_req(Mig_request)
-        del Mig_request
+        match self.block_manager.can_allocate(Mig_request.req):
+            case AllocStatus.OK:         
+                self.running_queue.append(request)
+                self.block_manager.allocate_prefilled_req(Mig_request)
+                del Mig_request
+            case AllocStatus.LATER:
+                return
+            case AllocStatus.NO:
+                self.abort_request(Mig_request)
         
     def _convert_migrate_requests(self, Mig_request:MigrateRequest)->Request:
         req=Mig_request.req
@@ -68,12 +76,17 @@ class FCFS_DecodeStageScheduler(DecodeStageScheduler):
         req.status=RequestStatus.RUNNING
         return req
     
-    def abort_request(self, request:Request)->None:
-        for (i,req) in enumerate(self.waiting_queue):
-            if request.request_id==req.req.request_id:
-                del self.waiting_queue[i]
-                return
-    
+    def abort_request(self, request:Request|MigrateRequest)->None:
+        if isinstance(req,MigrateRequest):
+            for (i,req) in enumerate(self.waiting_queue):
+                if request.req.request_id==req.req.request_id:
+                    del self.waiting_queue[i]
+                    return
+        else:
+            for (i,req) in enumerate(self.running_queue):
+                if request.request_id==req.request_id:
+                    del self.running_queue[i]
+                    return
     def schedule_requests(self):
         batch=BatchedRequests()
         def _can_schedule(req:Request)->bool:
@@ -90,12 +103,16 @@ class FCFS_DecodeStageScheduler(DecodeStageScheduler):
         return        
 def get_decode_scheduler(parallel_config:ParallelConfig,
                  decode_scheduler_config:DecodeSchedulerConfig,
-                 cache_config:CacheConfig)->DecodeStageScheduler:
+                 cache_config:CacheConfig,
+                 num_gpu_blocks:int,
+                 num_cpu_blocks:int)->DecodeStageScheduler:
     match decode_scheduler_config.policy:
         case 'fcfs':
             return FCFS_DecodeStageScheduler(parallel_config=parallel_config,
                                      decode_scheduler_config=decode_scheduler_config,
-                                     cache_config=cache_config)
+                                     cache_config=cache_config,
+                                     num_gpu_blocks=num_gpu_blocks,
+                                     num_cpu_blocks=num_cpu_blocks)
     
         case _:
             raise ValueError("No such decode schedule policy.")
