@@ -312,30 +312,36 @@ class BlockTable:
         return res
     def _copy_blocks(
         self,
-        other_token_blocks:List[List[int]]
+        other_token_blocks:List[List[int]],
+        location:BlockLocation.GPU
     )->List[Block]:
+        print(f"tokens of other_token_blocks is {other_token_blocks}")
         blocks:List[Block]=[]
         block_token_ids:List[int] = []
         tail_token_ids:List[int] = []
+        prev_block=None
         for tokens in other_token_blocks:
             if len(tokens)==self._block_size:
                 block_token_ids.append(tokens)
             else:
                 tail_token_ids.append(tokens)
+        print(f"token id that can form a block {block_token_ids}")
         if block_token_ids:
             blocks.extend(
-                self._allocator.allocate_immutable_blocks(prev_block,BlockLocation.GPU))
+                self._allocator.allocate_immutable_blocks(prev_block=prev_block,
+                                                          block_token_ids=block_token_ids,
+                                                          device=location))
             prev_block = blocks[-1]
         if tail_token_ids:
             assert len(tail_token_ids) == 1
             cur_token_ids = tail_token_ids[0]
 
             block = self._allocator.allocate_mutable_block(
-                prev_block=prev_block,)
+                prev_block=prev_block,location=location)
             block.append_token_ids(cur_token_ids)
 
             blocks.append(block)
-
+        print(f"allocated blocks of decode part is {len(blocks)}")
         return blocks
     def _allocate_blocks_for_token_ids(
         self,

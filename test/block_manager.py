@@ -1,7 +1,9 @@
+'''construct requests,test allocation and free of block manager'''
+
 from MixFrame.block.blockmanager import BlockManager
 from MixFrame.request.request import Request
 from MixFrame.request.sampling_parameter import SamplingParemeters
-from MixFrame.tokenizer.tokenizer import  get_tokenizer,decode_tokens,encode_tokens
+from MixFrame.tokenizer.tokenizer import  get_tokenizer,encode_tokens
 import time
 block_manager=BlockManager(block_size=16,num_gpu_blocks=30,num_cpu_blocks=10,watermark=0.01)
 prompt="hello world,what's the whether like today?are you ok? nonono"

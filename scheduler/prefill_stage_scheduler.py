@@ -54,7 +54,7 @@ class PrefillStageScheduler(ABC):
         suit a batch'''
         req.schedule_type=sche_type
     @abstractmethod
-    def _convert_request_to_Migrequest(self,request:Request):
+    def convert_request_to_Migrequest(self,request:Request):
         raise NotImplementedError
     @abstractmethod
     def clear_req(self,request:Request)->None:
@@ -92,19 +92,20 @@ class FCFS_PrefillStageScheduler(PrefillStageScheduler):
                 self.prefill_scheduler_config.max_token_num_each_req>req.get_len() and \
                 self.block_manager.can_append_slots(req):
                     batch.add_request(req)
-        for req in self.waiting_queue:
+        for (i,req) in enumerate(self.waiting_queue):
             if self.prefill_scheduler_config.max_batch_size>len(batch.requests) and \
                 self.prefill_scheduler_config.max_token_num_each_req>req.get_len() and \
                 self.block_manager.can_allocate(req)==AllocStatus.OK:
                     batch.add_request(req)
                     self.block_manager.allocate(req)
+                    del self.waiting_queue[i]
             if self.block_manager.can_allocate(req)==AllocStatus.NO or \
                 not self.prefill_scheduler_config.max_batch_size>len(batch.requests) or\
                 not self.prefill_scheduler_config.max_token_num_each_req>req.get_len():
                     self.abort_request(req)
         return batch
     
-    def _convert_request_to_Migrequest(self,req:Request)->None:
+    def convert_request_to_Migrequest(self,req:Request)->None:
         #convert request to migration request and add it to migrate_queue
         block_table=self.block_manager.req_table[req.request_id]
         migrate_request=MigrateRequest(req=req,para_config=self.parallel_config)

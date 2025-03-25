@@ -72,7 +72,9 @@ class BlockManager:
         block_table = BlockTable(
             block_size=self.block_size,block_allocator=self.gpu_block_allocator,max_block_sliding_window=self.sliding_window
         )
-        block_table._copy_blocks(req.blocks)
+        blocks=block_table._copy_blocks(req.blocks,location=BlockLocation.GPU)
+        block_table.update(blocks)
+        print(f'block table of migrate request is{block_table.used_blocks()}')
         return block_table
     
     def allocate(self,req:Request)->None:

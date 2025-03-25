@@ -17,7 +17,7 @@ class DecodeStageScheduler(ABC):
     async def recv_mig_request(self):
         raise NotImplementedError
     @abstractmethod
-    def _add_request(self,Mig_req:MigrateRequest)->None:
+    def add_request(self,Mig_req:MigrateRequest)->None:
         '''add_request to waiting queue'''
         raise NotImplementedError
     
@@ -56,12 +56,12 @@ class FCFS_DecodeStageScheduler(DecodeStageScheduler):
         self.waiting_queue.append(mig_req)
         if self.waiting_queue:
             for req in self.waiting_queue:
-                self._add_request(req)
+                self.add_request(req)
                 
-    def _add_request(self,Mig_request:MigrateRequest)->None:
-        request=self._convert_migrate_requests(Mig_request)
+    def add_request(self,Mig_request:MigrateRequest)->None:
         match self.block_manager.can_allocate(Mig_request.req):
-            case AllocStatus.OK:         
+            case AllocStatus.OK:      
+                request=self._convert_migrate_requests(Mig_request)   
                 self.running_queue.append(request)
                 self.block_manager.allocate_prefilled_req(Mig_request)
                 del Mig_request
@@ -72,7 +72,7 @@ class FCFS_DecodeStageScheduler(DecodeStageScheduler):
         
     def _convert_migrate_requests(self, Mig_request:MigrateRequest)->Request:
         req=Mig_request.req
-        self.block_manager.req_table[req.request_id]
+        #self.block_manager.req_table[req.request_id]=self.block_manager.allocate(req)
         req.status=RequestStatus.RUNNING
         return req
     
@@ -91,7 +91,7 @@ class FCFS_DecodeStageScheduler(DecodeStageScheduler):
         batch=BatchedRequests()
         def _can_schedule(req:Request)->bool:
             if (len(batch.requests)<self.decode_scheduler_config.max_batch_size) and \
-            (self.block_manager.can_append_slots(req)) and \
+            (self.block_manager.can_append_slots(req=req,ahead_slots=1)) and \
             (req.get_len()<self.decode_scheduler_config.max_token_num_each_req):
                 return True
         for req in self.running_queue:

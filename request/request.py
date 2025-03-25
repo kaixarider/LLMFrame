@@ -156,6 +156,6 @@ class MigrateRequest:
         self.blocks:List[List[int]]=[]
 
     def add_block_token_ids(self,block_token_ids:List[int])->None:
-        self.blocks.extend(block_token_ids)
+        self.blocks.append(block_token_ids)
         return 
         
