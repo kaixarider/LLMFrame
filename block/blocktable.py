@@ -333,7 +333,7 @@ class BlockTable:
             blocks.extend(
                 self._allocator.allocate_immutable_blocks(prev_block=prev_block,
                                                           block_token_ids=block_token_ids,
-                                                          device=location))
+                                                          location=location))
             prev_block = blocks[-1]
         if tail_token_ids:
             assert len(tail_token_ids) == 1
