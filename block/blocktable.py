@@ -18,7 +18,7 @@ class Block:
         prev_block:Optional['Block'],
         block_size:int,
         block_id:BlockId,
-        block_location:BlockLocation,
+        block_location:Optional[BlockLocation],
         token_ids:Optional[List[int]]=None,
         
     )->None:
@@ -34,7 +34,7 @@ class Block:
         token_num=len(token_ids)
         if token_num==0:
             return
-        assert token_num<self.empty_slots,f"Error!There is no enough slots in \
+        assert token_num<=self.empty_slots,f"Error!There is no enough slots in \
             block {self.block_id}"
         self._token_ids.extend(token_ids)
     
@@ -60,47 +60,48 @@ class BlockPool:
     def __init__(
         self,
         block_size:int,
-        pool_size:int,
-        pool_location:BlockLocation
+        pool_size:int
     )->None:
         self._block_size=block_size
         self._pool_size=pool_size
         self._free_id:Deque[int]=deque(range(pool_size))
-        self.pool_location=pool_location
         self._pool:List[Block]=[]
         for id in range(pool_size):
             self._pool.append(Block(prev_block=None,block_size=block_size,
                                     block_id=id,token_ids=[],
-                                    block_location=pool_location))
+                                    block_location=None))
     
     def increase_pool(self)->None:
         cur_bool_size=self._pool_size
         self._pool_size=cur_bool_size*2
         self._free_id.extend(range(cur_bool_size,self._pool_size))
         for id in range(cur_bool_size,self._pool_size):
-            self._pool.append(Block(self._block_size,id,self.pool_location,None))
+            self._pool.append(Block(prev_block=None,block_size=self._block_size,block_id=id,
+                                    block_location=None,token_ids=[]))
     
     def free_block(self,block:Block)->None:
-        self._free_id.appendleft(block.block_id)
+        self._free_id.appendleft(block.pool_id)
     
     def init_block(self,
                    token_id:List[int],
                    prev_block:Optional[Block],
                    block_size:int,
                    physical_block_id:Optional[int],
+                   block_location:BlockLocation
                    )->Block:
         if len(self._free_id) == 0:
             self.increase_pool()
             assert len(self._free_id) > 0
 
         pool_id = self._free_id.popleft()
+
         block = self._pool[pool_id]
         block.__init__(
             block_size=block_size,
             prev_block=prev_block,
             block_id=physical_block_id,
             token_ids=token_id,
-            block_location=self.pool_location
+            block_location=block_location
         )
         block.pool_id=pool_id
         return block
@@ -174,7 +175,7 @@ class BlockAllocator:
             # than physical blocks
             extra_factor=4
             self._block_pool = BlockPool(self._block_size, 
-                                         num_blocks * extra_factor,location)
+                                         num_blocks * extra_factor)
         else:
             # In this case, the block pool is provided by the caller,
             # which means that there is most likely a need to share
@@ -194,7 +195,8 @@ class BlockAllocator:
             prev_block=prev_block,
             token_id=[],
             block_size=self._block_size,
-            physical_block_id=block_id,  
+            physical_block_id=block_id, 
+            block_location=location 
         )
         return block
     
@@ -211,11 +213,11 @@ class BlockAllocator:
             self,
             prev_block: Optional[Block],
             block_token_ids: List[List[int]],
-            device: Optional[BlockLocation]=BlockLocation.GPU) -> List[Block]:
+            location: Optional[BlockLocation]=BlockLocation.GPU) -> List[Block]:
         num_blocks = len(block_token_ids)
 
         block_ids = []
-        print(self._free_block_indices)
+        #print(self._free_block_indices)
         for i in range(num_blocks):
             block_ids.append(self._allocate_block_id())
 
@@ -225,7 +227,8 @@ class BlockAllocator:
                 prev_block=prev_block,
                 token_id=block_token_ids[i],
                 block_size=self._block_size,
-                physical_block_id=block_ids[i])
+                physical_block_id=block_ids[i],
+                block_location=location)
             blocks.append(prev_block)
         return blocks
     
@@ -255,7 +258,7 @@ class BlockAllocator:
         for block in blocks:
             self._free_block_id(block.block_id)
             block_ids.append(block.block_id)
-        return 
+        return  block_ids
     def swap_in(self,blocks:List[Block])->List[int]:
         block_ids=[]
         for block in blocks:
@@ -315,7 +318,7 @@ class BlockTable:
         other_token_blocks:List[List[int]],
         location:BlockLocation.GPU
     )->List[Block]:
-        print(f"tokens of other_token_blocks is {other_token_blocks}")
+       # print(f"tokens of other_token_blocks is {other_token_blocks}")
         blocks:List[Block]=[]
         block_token_ids:List[int] = []
         tail_token_ids:List[int] = []
@@ -325,7 +328,7 @@ class BlockTable:
                 block_token_ids.append(tokens)
             else:
                 tail_token_ids.append(tokens)
-        print(f"token id that can form a block {block_token_ids}")
+        #print(f"token id that can form a block {block_token_ids}")
         if block_token_ids:
             blocks.extend(
                 self._allocator.allocate_immutable_blocks(prev_block=prev_block,
@@ -341,7 +344,7 @@ class BlockTable:
             block.append_token_ids(cur_token_ids)
 
             blocks.append(block)
-        print(f"allocated blocks of decode part is {len(blocks)}")
+        #print(f"allocated blocks of decode part is {len(blocks)}")
         return blocks
     def _allocate_blocks_for_token_ids(
         self,
@@ -361,7 +364,7 @@ class BlockTable:
                 tail_token_ids.append(cur_token_ids)
         if block_token_ids:
             blocks.extend(
-                self._allocator.allocate_immutable_blocks(prev_block=prev_block,block_token_ids=block_token_ids,device=location))
+                self._allocator.allocate_immutable_blocks(prev_block=prev_block,block_token_ids=block_token_ids,location=location))
             prev_block = blocks[-1]
         if tail_token_ids:
             assert len(tail_token_ids) == 1
